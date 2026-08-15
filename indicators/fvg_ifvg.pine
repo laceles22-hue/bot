@@ -1,0 +1,233 @@
+//@version=6
+// =====================================================================
+// FVG & IFVG — Fair Value Gap / Inverse Fair Value Gap
+// ---------------------------------------------------------------------
+// FVG  (Fair Value Gap): desequilibrio de precio detectado con el
+//       patrón clásico de 3 velas. Alcista: low[0] > high[2].
+//       Bajista: high[0] < low[2].
+// IFVG (Inverse Fair Value Gap): cuando una FVG queda totalmente
+//       invalidada (el precio la atraviesa por completo), la misma
+//       zona se "invierte" y pasa a actuar como soporte/resistencia
+//       en el sentido contrario.
+// =====================================================================
+indicator("FVG & IFVG (Fair Value Gap / Inverse FVG)", shorttitle="FVG+IFVG", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ============================= INPUTS =============================
+grpFvg = "Fair Value Gap (FVG)"
+showBullFvg   = input.bool(true, "Mostrar FVG alcistas", group=grpFvg)
+showBearFvg   = input.bool(true, "Mostrar FVG bajistas", group=grpFvg)
+bullFvgBg     = input.color(color.new(color.teal, 80), "Relleno FVG alcista", group=grpFvg)
+bearFvgBg     = input.color(color.new(color.red, 80), "Relleno FVG bajista", group=grpFvg)
+bullFvgBorder = input.color(color.new(color.teal, 0), "Borde FVG alcista", group=grpFvg)
+bearFvgBorder = input.color(color.new(color.red, 0), "Borde FVG bajista", group=grpFvg)
+
+grpIfvg = "Inverse Fair Value Gap (IFVG)"
+showIfvg         = input.bool(true, "Mostrar IFVG (se crea al mitigarse una FVG por cierre)", group=grpIfvg)
+bullIfvgBg       = input.color(color.new(color.lime, 80), "Relleno IFVG alcista", group=grpIfvg)
+bearIfvgBg       = input.color(color.new(color.fuchsia, 80), "Relleno IFVG bajista", group=grpIfvg)
+bullIfvgBorder   = input.color(color.new(color.lime, 0), "Borde IFVG alcista", group=grpIfvg)
+bearIfvgBorder   = input.color(color.new(color.fuchsia, 0), "Borde IFVG bajista", group=grpIfvg)
+deleteIfvgOnFill = input.bool(true, "Eliminar IFVG al volver a mitigarse", group=grpIfvg)
+
+grpFilter = "Filtros"
+minGapAtrMult   = input.float(0.0, "Tamaño mínimo del gap (x ATR)", minval=0.0, step=0.05, group=grpFilter, tooltip="0 = sin filtro. Ej: 0.25 descarta gaps menores al 25% del ATR")
+atrLen          = input.int(14, "Periodo ATR", minval=1, group=grpFilter)
+maxZonesPerSide = input.int(20, "Máx. zonas activas por tipo", minval=1, maxval=100, group=grpFilter)
+
+grpDisplay = "Visualización"
+extendRight      = input.bool(true, "Extender cajas hasta la barra actual", group=grpDisplay)
+showMidline      = input.bool(false, "Mostrar línea media (CE 50%)", group=grpDisplay)
+borderWidth      = input.int(1, "Grosor de borde", minval=1, maxval=4, group=grpDisplay)
+showLabels       = input.bool(true, "Mostrar etiquetas", group=grpDisplay)
+keepMitigatedFvg = input.bool(false, "Conservar FVG mitigado (atenuado, en gris)", group=grpDisplay)
+
+grpMit = "Mitigación"
+mitigationMode = input.string("Cierre", "Invalidar/mitigar cuando", options=["Mecha (toque)", "Cierre"], group=grpMit, tooltip="Mecha: se invalida en cuanto el precio toca la zona.\nCierre: solo se invalida si una vela CIERRA totalmente al otro lado (recomendado, sobre todo para IFVG).")
+
+// ============================= TIPOS =============================
+type Zone
+    box   b
+    line  ce
+    label lbl
+    float top
+    float bottom
+
+var array<Zone> bullFvgZones  = array.new<Zone>()
+var array<Zone> bearFvgZones  = array.new<Zone>()
+var array<Zone> bullIfvgZones = array.new<Zone>()
+var array<Zone> bearIfvgZones = array.new<Zone>()
+
+// ============================= HELPERS =============================
+atrVal = ta.atr(atrLen)
+
+closedThrough(bottomEdge, topEdge, isBullZone) =>
+    if isBullZone
+        mitigationMode == "Cierre" ? close < bottomEdge : low < bottomEdge
+    else
+        mitigationMode == "Cierre" ? close > topEdge : high > topEdge
+
+// ============================= DETECCIÓN FVG (patrón de 3 velas) =============================
+bullGapUp = low > high[2]
+bearGapDn = high < low[2]
+
+bullTop = low
+bullBot = high[2]
+bearTop = low[2]
+bearBot = high
+
+bullSizeOk = minGapAtrMult <= 0 or (bullTop - bullBot) >= atrVal * minGapAtrMult
+bearSizeOk = minGapAtrMult <= 0 or (bearTop - bearBot) >= atrVal * minGapAtrMult
+
+newBullFvg = showBullFvg and bullGapUp and bullSizeOk
+newBearFvg = showBearFvg and bearGapDn and bearSizeOk
+
+// ============================= CREACIÓN DE ZONAS FVG =============================
+if newBullFvg
+    leftX = bar_index - 2
+    b = box.new(leftX, bullTop, bar_index, bullBot, border_color=bullFvgBorder, border_width=borderWidth, bgcolor=bullFvgBg)
+    line ce = na
+    if showMidline
+        ce := line.new(leftX, (bullTop + bullBot) / 2, bar_index, (bullTop + bullBot) / 2, color=bullFvgBorder, style=line.style_dotted)
+    label lbl = na
+    if showLabels
+        lbl := label.new(leftX, bullBot, "FVG", style=label.style_label_up, color=color.new(color.white, 100), textcolor=bullFvgBorder, size=size.tiny)
+    array.push(bullFvgZones, Zone.new(b, ce, lbl, bullTop, bullBot))
+    if array.size(bullFvgZones) > maxZonesPerSide
+        old = array.shift(bullFvgZones)
+        box.delete(old.b)
+        if not na(old.ce)
+            line.delete(old.ce)
+        if not na(old.lbl)
+            label.delete(old.lbl)
+
+if newBearFvg
+    leftX = bar_index - 2
+    b = box.new(leftX, bearTop, bar_index, bearBot, border_color=bearFvgBorder, border_width=borderWidth, bgcolor=bearFvgBg)
+    line ce = na
+    if showMidline
+        ce := line.new(leftX, (bearTop + bearBot) / 2, bar_index, (bearTop + bearBot) / 2, color=bearFvgBorder, style=line.style_dotted)
+    label lbl = na
+    if showLabels
+        lbl := label.new(leftX, bearTop, "FVG", style=label.style_label_down, color=color.new(color.white, 100), textcolor=bearFvgBorder, size=size.tiny)
+    array.push(bearFvgZones, Zone.new(b, ce, lbl, bearTop, bearBot))
+    if array.size(bearFvgZones) > maxZonesPerSide
+        old = array.shift(bearFvgZones)
+        box.delete(old.b)
+        if not na(old.ce)
+            line.delete(old.ce)
+        if not na(old.lbl)
+            label.delete(old.lbl)
+
+// ============================= GESTIÓN + MITIGACIÓN: FVG ALCISTA =============================
+if array.size(bullFvgZones) > 0
+    for i = array.size(bullFvgZones) - 1 to 0
+        z = array.get(bullFvgZones, i)
+        if extendRight
+            box.set_right(z.b, bar_index)
+            if not na(z.ce)
+                line.set_x2(z.ce, bar_index)
+        if closedThrough(z.bottom, z.top, true)
+            array.remove(bullFvgZones, i)
+            if keepMitigatedFvg
+                box.set_bgcolor(z.b, color.new(color.gray, 90))
+                box.set_border_color(z.b, color.new(color.gray, 60))
+                box.set_right(z.b, bar_index)
+                if not na(z.ce)
+                    line.delete(z.ce)
+            else
+                box.delete(z.b)
+                if not na(z.ce)
+                    line.delete(z.ce)
+                if not na(z.lbl)
+                    label.delete(z.lbl)
+            if showIfvg
+                nb = box.new(bar_index, z.top, bar_index, z.bottom, border_color=bearIfvgBorder, border_width=borderWidth, bgcolor=bearIfvgBg)
+                line nce = na
+                if showMidline
+                    nce := line.new(bar_index, (z.top + z.bottom) / 2, bar_index, (z.top + z.bottom) / 2, color=bearIfvgBorder, style=line.style_dotted)
+                label nlbl = na
+                if showLabels
+                    nlbl := label.new(bar_index, z.top, "IFVG", style=label.style_label_down, color=color.new(color.white, 100), textcolor=bearIfvgBorder, size=size.tiny)
+                array.push(bearIfvgZones, Zone.new(nb, nce, nlbl, z.top, z.bottom))
+                if array.size(bearIfvgZones) > maxZonesPerSide
+                    oldz = array.shift(bearIfvgZones)
+                    box.delete(oldz.b)
+                    if not na(oldz.ce)
+                        line.delete(oldz.ce)
+                    if not na(oldz.lbl)
+                        label.delete(oldz.lbl)
+
+// ============================= GESTIÓN + MITIGACIÓN: FVG BAJISTA =============================
+if array.size(bearFvgZones) > 0
+    for i = array.size(bearFvgZones) - 1 to 0
+        z = array.get(bearFvgZones, i)
+        if extendRight
+            box.set_right(z.b, bar_index)
+            if not na(z.ce)
+                line.set_x2(z.ce, bar_index)
+        if closedThrough(z.bottom, z.top, false)
+            array.remove(bearFvgZones, i)
+            if keepMitigatedFvg
+                box.set_bgcolor(z.b, color.new(color.gray, 90))
+                box.set_border_color(z.b, color.new(color.gray, 60))
+                box.set_right(z.b, bar_index)
+                if not na(z.ce)
+                    line.delete(z.ce)
+            else
+                box.delete(z.b)
+                if not na(z.ce)
+                    line.delete(z.ce)
+                if not na(z.lbl)
+                    label.delete(z.lbl)
+            if showIfvg
+                nb = box.new(bar_index, z.top, bar_index, z.bottom, border_color=bullIfvgBorder, border_width=borderWidth, bgcolor=bullIfvgBg)
+                line nce = na
+                if showMidline
+                    nce := line.new(bar_index, (z.top + z.bottom) / 2, bar_index, (z.top + z.bottom) / 2, color=bullIfvgBorder, style=line.style_dotted)
+                label nlbl = na
+                if showLabels
+                    nlbl := label.new(bar_index, z.bottom, "IFVG", style=label.style_label_up, color=color.new(color.white, 100), textcolor=bullIfvgBorder, size=size.tiny)
+                array.push(bullIfvgZones, Zone.new(nb, nce, nlbl, z.top, z.bottom))
+                if array.size(bullIfvgZones) > maxZonesPerSide
+                    oldz = array.shift(bullIfvgZones)
+                    box.delete(oldz.b)
+                    if not na(oldz.ce)
+                        line.delete(oldz.ce)
+                    if not na(oldz.lbl)
+                        label.delete(oldz.lbl)
+
+// ============================= GESTIÓN + MITIGACIÓN: IFVG ALCISTA (soporte) =============================
+if array.size(bullIfvgZones) > 0
+    for i = array.size(bullIfvgZones) - 1 to 0
+        z = array.get(bullIfvgZones, i)
+        if extendRight
+            box.set_right(z.b, bar_index)
+            if not na(z.ce)
+                line.set_x2(z.ce, bar_index)
+        if deleteIfvgOnFill and closedThrough(z.bottom, z.top, true)
+            array.remove(bullIfvgZones, i)
+            box.delete(z.b)
+            if not na(z.ce)
+                line.delete(z.ce)
+            if not na(z.lbl)
+                label.delete(z.lbl)
+
+// ============================= GESTIÓN + MITIGACIÓN: IFVG BAJISTA (resistencia) =============================
+if array.size(bearIfvgZones) > 0
+    for i = array.size(bearIfvgZones) - 1 to 0
+        z = array.get(bearIfvgZones, i)
+        if extendRight
+            box.set_right(z.b, bar_index)
+            if not na(z.ce)
+                line.set_x2(z.ce, bar_index)
+        if deleteIfvgOnFill and closedThrough(z.bottom, z.top, false)
+            array.remove(bearIfvgZones, i)
+            box.delete(z.b)
+            if not na(z.ce)
+                line.delete(z.ce)
+            if not na(z.lbl)
+                label.delete(z.lbl)
+
+// ============================= ALERTAS =============================
+alertcondition(newBullFvg, title="Nuevo FVG alcista", message="Se formó un nuevo Fair Value Gap alcista")
+alertcondition(newBearFvg, title="Nuevo FVG bajista", message="Se formó un nuevo Fair Value Gap bajista")
