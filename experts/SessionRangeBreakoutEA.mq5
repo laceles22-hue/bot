@@ -36,6 +36,8 @@ input double   InpRiskPercent           = 0.5;      // % de riesgo por operació
 input bool     InpUseFixedBalance       = true;     // Usar balance de referencia fijo (recomendado en fondeos)
 input double   InpFixedBalance          = 10000.0;  // Balance de referencia (si InpUseFixedBalance=true)
 input bool     InpAllowMinLotIfTooSmall = false;    // Usar lote mínimo si el riesgo calculado da un lote menor al mínimo
+input bool     InpUseFixedLot           = false;    // Usar un lote fijo en vez de calcularlo por % de riesgo
+input double   InpFixedLotSize          = 0.01;     // Lote fijo (si InpUseFixedLot=true)
 
 //--- Filtros
 input group "===== Filtros ====="
@@ -252,9 +254,39 @@ ENUM_ORDER_TYPE_FILLING GetFillingMode()
 //+------------------------------------------------------------------+
 //| Calcula el lote según % de riesgo sobre el balance de referencia |
 //+------------------------------------------------------------------+
+double NormalizeVolume(const double rawLots)
+{
+   double volMin  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double volMax  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double volStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(volStep <= 0) volStep = 0.01;
+
+   double normalized = MathFloor(rawLots / volStep) * volStep;
+   normalized = NormalizeDouble(normalized, 2);
+
+   if(normalized < volMin) normalized = 0.0; // el llamador decide si usa el mínimo o descarta
+   if(normalized > volMax) normalized = volMax;
+
+   return normalized;
+}
+
 double CalculateLotSize(const double slDistance, string &reason)
 {
    reason = "";
+
+   //--- Modo lote fijo: ignora el % de riesgo, solo normaliza al volumen del símbolo
+   if(InpUseFixedLot)
+   {
+      double fixedNormalized = NormalizeVolume(InpFixedLotSize);
+      if(fixedNormalized <= 0)
+      {
+         double volMin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+         reason = StringFormat("InpFixedLotSize=%.4f < volumen mínimo %.4f del símbolo.", InpFixedLotSize, volMin);
+         return 0.0;
+      }
+      return fixedNormalized;
+   }
+
    double refBalance = InpUseFixedBalance ? InpFixedBalance : AccountInfoDouble(ACCOUNT_BALANCE);
    double riskMoney   = refBalance * InpRiskPercent / 100.0;
 
@@ -275,17 +307,11 @@ double CalculateLotSize(const double slDistance, string &reason)
    }
 
    double lots = riskMoney / lossPerLot;
+   double normalized = NormalizeVolume(lots);
 
-   double volMin  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double volMax  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   double volStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   if(volStep <= 0) volStep = 0.01;
-
-   double normalized = MathFloor(lots / volStep) * volStep;
-   normalized = NormalizeDouble(normalized, 2);
-
-   if(normalized < volMin)
+   if(normalized <= 0)
    {
+      double volMin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
       if(InpAllowMinLotIfTooSmall)
       {
          normalized = volMin;
@@ -299,8 +325,6 @@ double CalculateLotSize(const double slDistance, string &reason)
          return 0.0;
       }
    }
-   if(normalized > volMax)
-      normalized = volMax;
 
    return normalized;
 }
@@ -384,14 +408,21 @@ void OpenTrade(const ENUM_ORDER_TYPE dir)
       double tickValue    = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
       double tickSize     = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
       double actualRiskUSD = lots * (slDistance / tickSize) * tickValue;
+      double actualRiskPct = (refBalance > 0 ? actualRiskUSD / refBalance * 100.0 : 0);
 
-      PrintFormat("SessionRangeBreakoutEA: %s abierta. Lote=%.2f SL=%.5f TP=%.5f | "
-                  "riesgo objetivo=%.2f (%.2f%% de %.2f) riesgo real=%.2f (%.2f%%) "
-                  "[tick_value=%.5f tick_size=%.5f slDistance=%.5f]",
-                  (dir == ORDER_TYPE_BUY ? "COMPRA" : "VENTA"), lots, sl, tp,
-                  refBalance * InpRiskPercent / 100.0, InpRiskPercent, refBalance,
-                  actualRiskUSD, (refBalance > 0 ? actualRiskUSD / refBalance * 100.0 : 0),
-                  tickValue, tickSize, slDistance);
+      if(InpUseFixedLot)
+         PrintFormat("SessionRangeBreakoutEA: %s abierta. Lote fijo=%.2f SL=%.5f TP=%.5f | "
+                     "riesgo real=%.2f (%.2f%% de %.2f) [tick_value=%.5f tick_size=%.5f slDistance=%.5f]",
+                     (dir == ORDER_TYPE_BUY ? "COMPRA" : "VENTA"), lots, sl, tp,
+                     actualRiskUSD, actualRiskPct, refBalance, tickValue, tickSize, slDistance);
+      else
+         PrintFormat("SessionRangeBreakoutEA: %s abierta. Lote=%.2f SL=%.5f TP=%.5f | "
+                     "riesgo objetivo=%.2f (%.2f%% de %.2f) riesgo real=%.2f (%.2f%%) "
+                     "[tick_value=%.5f tick_size=%.5f slDistance=%.5f]",
+                     (dir == ORDER_TYPE_BUY ? "COMPRA" : "VENTA"), lots, sl, tp,
+                     refBalance * InpRiskPercent / 100.0, InpRiskPercent, refBalance,
+                     actualRiskUSD, actualRiskPct,
+                     tickValue, tickSize, slDistance);
    }
    else
    {
