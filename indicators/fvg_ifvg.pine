@@ -62,6 +62,16 @@ sessWidth       = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grp
 sessStyleInput  = input.string("Discontinua", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpSess)
 showSessLabels  = input.bool(true, "Mostrar etiquetas", group=grpSess)
 
+grpLdn = "Sesión de Londres anterior"
+showLdnHl      = input.bool(true, "Mostrar Alto/Bajo de la sesión de Londres anterior", group=grpLdn)
+ldnSession     = input.session("0800-1630", "Horario de la sesión Londres (HHMM-HHMM)", group=grpLdn, tooltip="Por defecto: horario regular del London Stock Exchange (08:00-16:30 hora de Londres).")
+ldnTimezone    = "Europe/London"
+ldnHighColor   = input.color(color.new(color.purple, 0), "Color alto de sesión Londres", group=grpLdn)
+ldnLowColor    = input.color(color.new(color.maroon, 0), "Color bajo de sesión Londres", group=grpLdn)
+ldnWidth       = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpLdn)
+ldnStyleInput  = input.string("Discontinua", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpLdn)
+showLdnLabels  = input.bool(true, "Mostrar etiquetas", group=grpLdn)
+
 // ============================= TIPOS =============================
 type Zone
     box   b
@@ -89,6 +99,7 @@ lineStyleFromInput(s) =>
 
 pdhlLineStyle = lineStyleFromInput(pdhlStyleInput)
 sessLineStyle = lineStyleFromInput(sessStyleInput)
+ldnLineStyle  = lineStyleFromInput(ldnStyleInput)
 
 // ============================= DETECCIÓN FVG (patrón de 3 velas) =============================
 bullGapUp = low > high[2]
@@ -339,6 +350,58 @@ if showSessHl and not na(sessHLine)
     if not na(sessHLbl)
         label.set_x(sessHLbl, bar_index)
         label.set_x(sessLLbl, bar_index)
+
+// ============================= ALTO / BAJO DE LA SESIÓN DE LONDRES ANTERIOR =============================
+inLdnSession = not na(time(timeframe.period, ldnSession, ldnTimezone))
+
+var float runLdnHigh  = na
+var float runLdnLow   = na
+var float prevLdnHigh = na
+var float prevLdnLow  = na
+var bool  wasInLdnSession = false
+
+ldnSessionStart = inLdnSession and not wasInLdnSession
+ldnSessionEnd   = wasInLdnSession and not inLdnSession
+
+if ldnSessionStart
+    runLdnHigh := high
+    runLdnLow  := low
+else if inLdnSession
+    runLdnHigh := math.max(runLdnHigh, high)
+    runLdnLow  := math.min(runLdnLow, low)
+
+if ldnSessionEnd
+    prevLdnHigh := runLdnHigh
+    prevLdnLow  := runLdnLow
+
+wasInLdnSession := inLdnSession
+
+var line  ldnHLine = na
+var line  ldnLLine = na
+var label ldnHLbl  = na
+var label ldnLLbl  = na
+
+if showLdnHl and ldnSessionEnd and not na(prevLdnHigh)
+    if not na(ldnHLine)
+        line.delete(ldnHLine)
+    if not na(ldnLLine)
+        line.delete(ldnLLine)
+    if not na(ldnHLbl)
+        label.delete(ldnHLbl)
+    if not na(ldnLLbl)
+        label.delete(ldnLLbl)
+    ldnHLine := line.new(bar_index, prevLdnHigh, bar_index, prevLdnHigh, color=ldnHighColor, width=ldnWidth, style=ldnLineStyle)
+    ldnLLine := line.new(bar_index, prevLdnLow, bar_index, prevLdnLow, color=ldnLowColor, width=ldnWidth, style=ldnLineStyle)
+    if showLdnLabels
+        ldnHLbl := label.new(bar_index, prevLdnHigh, "LDN H", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnHighColor, size=size.tiny)
+        ldnLLbl := label.new(bar_index, prevLdnLow, "LDN L", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnLowColor, size=size.tiny)
+
+if showLdnHl and not na(ldnHLine)
+    line.set_x2(ldnHLine, bar_index)
+    line.set_x2(ldnLLine, bar_index)
+    if not na(ldnHLbl)
+        label.set_x(ldnHLbl, bar_index)
+        label.set_x(ldnLLbl, bar_index)
 
 // ============================= ALERTAS =============================
 alertcondition(newBullFvg, title="Nuevo FVG alcista", message="Se formó un nuevo Fair Value Gap alcista")
