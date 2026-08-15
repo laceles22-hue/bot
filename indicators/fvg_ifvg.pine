@@ -298,19 +298,25 @@ if showPdhl and not na(pdhLine)
 
 // ============================= ALTO / BAJO DE LA SESIÓN DE NY ANTERIOR =============================
 inSession = not na(time(timeframe.period, sessSession, sessTimezone))
+sessDayId = year(time, sessTimezone) * 10000 + month(time, sessTimezone) * 100 + dayofmonth(time, sessTimezone)
 
 var float runSessHigh  = na
 var float runSessLow   = na
 var float prevSessHigh = na
 var float prevSessLow  = na
 var bool  wasInSession = false
+var int   lastSessDay  = na
 
-sessionStart = inSession and not wasInSession
+// Si por lo que sea la sesión no se cerró bien (ej. datos overnight de futuros),
+// el cambio de día calendario en la zona horaria de la sesión fuerza igual el reinicio
+// del acumulador, para que nunca quede arrastrando el rango de varias sesiones juntas.
+sessionStart = inSession and (not wasInSession or sessDayId != lastSessDay)
 sessionEnd   = wasInSession and not inSession
 
 if sessionStart
     runSessHigh := high
     runSessLow  := low
+    lastSessDay := sessDayId
 else if inSession
     runSessHigh := math.max(runSessHigh, high)
     runSessLow  := math.min(runSessLow, low)
@@ -353,19 +359,22 @@ if showSessHl and not na(sessHLine)
 
 // ============================= ALTO / BAJO DE LA SESIÓN DE LONDRES ANTERIOR =============================
 inLdnSession = not na(time(timeframe.period, ldnSession, ldnTimezone))
+ldnDayId = year(time, ldnTimezone) * 10000 + month(time, ldnTimezone) * 100 + dayofmonth(time, ldnTimezone)
 
 var float runLdnHigh  = na
 var float runLdnLow   = na
 var float prevLdnHigh = na
 var float prevLdnLow  = na
 var bool  wasInLdnSession = false
+var int   lastLdnDay      = na
 
-ldnSessionStart = inLdnSession and not wasInLdnSession
+ldnSessionStart = inLdnSession and (not wasInLdnSession or ldnDayId != lastLdnDay)
 ldnSessionEnd   = wasInLdnSession and not inLdnSession
 
 if ldnSessionStart
     runLdnHigh := high
     runLdnLow  := low
+    lastLdnDay := ldnDayId
 else if inLdnSession
     runLdnHigh := math.max(runLdnHigh, high)
     runLdnLow  := math.min(runLdnLow, low)
