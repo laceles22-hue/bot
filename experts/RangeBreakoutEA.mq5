@@ -252,19 +252,27 @@ ENUM_ORDER_TYPE_FILLING GetFillingMode()
 //+------------------------------------------------------------------+
 //| Calcula el lote según % de riesgo sobre el balance de referencia |
 //+------------------------------------------------------------------+
-double CalculateLotSize(const double slDistance)
+double CalculateLotSize(const double slDistance, string &reason)
 {
+   reason = "";
    double refBalance = InpUseFixedBalance ? InpFixedBalance : AccountInfoDouble(ACCOUNT_BALANCE);
    double riskMoney   = refBalance * InpRiskPercent / 100.0;
 
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    if(tickSize <= 0 || tickValue <= 0)
+   {
+      reason = StringFormat("SYMBOL_TRADE_TICK_VALUE=%.5f / SYMBOL_TRADE_TICK_SIZE=%.5f inválidos para %s "
+                             "(el símbolo puede no tener datos de contrato cargados)", tickValue, tickSize, _Symbol);
       return 0.0;
+   }
 
    double lossPerLot = (slDistance / tickSize) * tickValue;
    if(lossPerLot <= 0)
+   {
+      reason = StringFormat("pérdida por lote calculada = %.5f (slDistance=%.5f)", lossPerLot, slDistance);
       return 0.0;
+   }
 
    double lots = riskMoney / lossPerLot;
 
@@ -279,9 +287,17 @@ double CalculateLotSize(const double slDistance)
    if(normalized < volMin)
    {
       if(InpAllowMinLotIfTooSmall)
+      {
          normalized = volMin;
+      }
       else
+      {
+         reason = StringFormat("lote calculado %.4f < volumen mínimo %.4f del símbolo "
+                                "(riesgo=%.2f %s, pérdida/lote=%.2f). Sube InpRiskPercent, "
+                                "baja InpATRMultiplierSL, o activa InpAllowMinLotIfTooSmall.",
+                                lots, volMin, riskMoney, AccountInfoString(ACCOUNT_CURRENCY), lossPerLot);
          return 0.0;
+      }
    }
    if(normalized > volMax)
       normalized = volMax;
@@ -296,11 +312,19 @@ void OpenTrade(const ENUM_ORDER_TYPE dir)
 {
    double atrBuf[];
    if(CopyBuffer(g_atrHandle, 0, 1, 1, atrBuf) <= 0)
+   {
+      PrintFormat("RangeBreakoutEA: operación omitida, no se pudo leer el ATR (buffer no listo todavía, error=%d).",
+                  GetLastError());
       return;
+   }
 
    double atr = atrBuf[0];
    if(atr <= 0)
+   {
+      PrintFormat("RangeBreakoutEA: operación omitida, ATR devuelto = %.5f (¿historial insuficiente para %d periodos?)",
+                  atr, InpATRPeriod);
       return;
+   }
 
    double slDistance = atr * InpATRMultiplierSL;
 
@@ -310,7 +334,10 @@ void OpenTrade(const ENUM_ORDER_TYPE dir)
    if(slDistance < minStopDist)
       slDistance = minStopDist;
    if(slDistance <= 0)
+   {
+      Print("RangeBreakoutEA: operación omitida, distancia de SL calculada = 0.");
       return;
+   }
 
    double price = (dir == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
                                            : SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -331,10 +358,11 @@ void OpenTrade(const ENUM_ORDER_TYPE dir)
    sl = NormalizeDouble(sl, digits);
    tp = NormalizeDouble(tp, digits);
 
-   double lots = CalculateLotSize(slDistance);
+   string lotReason = "";
+   double lots = CalculateLotSize(slDistance, lotReason);
    if(lots <= 0)
    {
-      Print("RangeBreakoutEA: el riesgo calculado no alcanza el lote mínimo, operación omitida.");
+      PrintFormat("RangeBreakoutEA: operación omitida, lote inválido. %s", lotReason);
       return;
    }
 
