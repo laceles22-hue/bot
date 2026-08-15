@@ -52,13 +52,12 @@ pdhlWidth      = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpP
 pdhlStyleInput = input.string("Sólida", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpPdhl)
 showPdhlLabels = input.bool(true, "Mostrar etiquetas PDH/PDL", group=grpPdhl)
 
-grpSess = "Sesión intradía anterior"
-showSessHl      = input.bool(true, "Mostrar Alto/Bajo de la sesión anterior", group=grpSess)
-sessSession     = input.session("0930-1600", "Horario de sesión (HHMM-HHMM)", group=grpSess)
-sessTimezone    = input.string("America/New_York", "Zona horaria de la sesión", group=grpSess)
-sessLabelName   = input.string("NY", "Nombre para las etiquetas", group=grpSess)
-sessHighColor   = input.color(color.new(color.yellow, 0), "Color alto de sesión", group=grpSess)
-sessLowColor    = input.color(color.new(color.aqua, 0), "Color bajo de sesión", group=grpSess)
+grpSess = "Sesión de Nueva York anterior"
+showSessHl      = input.bool(true, "Mostrar Alto/Bajo de la sesión de NY anterior", group=grpSess)
+sessSession     = input.session("0930-1600", "Horario de la sesión NY (HHMM-HHMM)", group=grpSess, tooltip="Por defecto: horario regular del mercado de EE.UU. (09:30-16:00 hora de Nueva York).")
+sessTimezone    = "America/New_York"
+sessHighColor   = input.color(color.new(color.yellow, 0), "Color alto de sesión NY", group=grpSess)
+sessLowColor    = input.color(color.new(color.aqua, 0), "Color bajo de sesión NY", group=grpSess)
 sessWidth       = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpSess)
 sessStyleInput  = input.string("Discontinua", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpSess)
 showSessLabels  = input.bool(true, "Mostrar etiquetas", group=grpSess)
@@ -286,7 +285,7 @@ if showPdhl and not na(pdhLine)
         label.set_x(pdhLbl, bar_index)
         label.set_x(pdlLbl, bar_index)
 
-// ============================= ALTO / BAJO DE LA SESIÓN INTRADÍA ANTERIOR =============================
+// ============================= ALTO / BAJO DE LA SESIÓN DE NY ANTERIOR =============================
 inSession = not na(time(timeframe.period, sessSession, sessTimezone))
 
 var float runSessHigh  = na
@@ -296,16 +295,21 @@ var float prevSessLow  = na
 var bool  wasInSession = false
 
 sessionStart = inSession and not wasInSession
+sessionEnd   = wasInSession and not inSession
 
 if sessionStart
-    if not na(runSessHigh)
-        prevSessHigh := runSessHigh
-        prevSessLow  := runSessLow
     runSessHigh := high
     runSessLow  := low
 else if inSession
-    runSessHigh := math.max(nz(runSessHigh, high), high)
-    runSessLow  := math.min(nz(runSessLow, low), low)
+    runSessHigh := math.max(runSessHigh, high)
+    runSessLow  := math.min(runSessLow, low)
+
+// La sesión anterior queda "cerrada" apenas termina, no cuando arranca la siguiente:
+// así la línea aparece de inmediato tras el cierre de NY, en vez de quedar en blanco
+// durante todo el hueco hasta la sesión siguiente.
+if sessionEnd
+    prevSessHigh := runSessHigh
+    prevSessLow  := runSessLow
 
 wasInSession := inSession
 
@@ -314,7 +318,7 @@ var line  sessLLine = na
 var label sessHLbl  = na
 var label sessLLbl  = na
 
-if showSessHl and sessionStart and not na(prevSessHigh)
+if showSessHl and sessionEnd and not na(prevSessHigh)
     if not na(sessHLine)
         line.delete(sessHLine)
     if not na(sessLLine)
@@ -326,8 +330,8 @@ if showSessHl and sessionStart and not na(prevSessHigh)
     sessHLine := line.new(bar_index, prevSessHigh, bar_index, prevSessHigh, color=sessHighColor, width=sessWidth, style=sessLineStyle)
     sessLLine := line.new(bar_index, prevSessLow, bar_index, prevSessLow, color=sessLowColor, width=sessWidth, style=sessLineStyle)
     if showSessLabels
-        sessHLbl := label.new(bar_index, prevSessHigh, sessLabelName + " H", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sessHighColor, size=size.tiny)
-        sessLLbl := label.new(bar_index, prevSessLow, sessLabelName + " L", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sessLowColor, size=size.tiny)
+        sessHLbl := label.new(bar_index, prevSessHigh, "NY H", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sessHighColor, size=size.tiny)
+        sessLLbl := label.new(bar_index, prevSessLow, "NY L", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sessLowColor, size=size.tiny)
 
 if showSessHl and not na(sessHLine)
     line.set_x2(sessHLine, bar_index)
