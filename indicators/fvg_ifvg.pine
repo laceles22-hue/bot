@@ -44,6 +44,25 @@ keepMitigatedFvg = input.bool(false, "Conservar FVG mitigado (atenuado, en gris)
 grpMit = "Mitigación"
 mitigationMode = input.string("Cierre", "Invalidar/mitigar cuando", options=["Mecha (toque)", "Cierre"], group=grpMit, tooltip="Mecha: se invalida en cuanto el precio toca la zona.\nCierre: solo se invalida si una vela CIERRA totalmente al otro lado (recomendado, sobre todo para IFVG).")
 
+grpPdhl = "Alto/Bajo del día anterior (PDH/PDL)"
+showPdhl       = input.bool(true, "Mostrar PDH/PDL", group=grpPdhl)
+pdhColor       = input.color(color.new(color.orange, 0), "Color PDH", group=grpPdhl)
+pdlColor       = input.color(color.new(color.blue, 0), "Color PDL", group=grpPdhl)
+pdhlWidth      = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpPdhl)
+pdhlStyleInput = input.string("Sólida", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpPdhl)
+showPdhlLabels = input.bool(true, "Mostrar etiquetas PDH/PDL", group=grpPdhl)
+
+grpSess = "Sesión intradía anterior"
+showSessHl      = input.bool(true, "Mostrar Alto/Bajo de la sesión anterior", group=grpSess)
+sessSession     = input.session("0930-1600", "Horario de sesión (HHMM-HHMM)", group=grpSess)
+sessTimezone    = input.string("America/New_York", "Zona horaria de la sesión", group=grpSess)
+sessLabelName   = input.string("NY", "Nombre para las etiquetas", group=grpSess)
+sessHighColor   = input.color(color.new(color.yellow, 0), "Color alto de sesión", group=grpSess)
+sessLowColor    = input.color(color.new(color.aqua, 0), "Color bajo de sesión", group=grpSess)
+sessWidth       = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpSess)
+sessStyleInput  = input.string("Discontinua", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpSess)
+showSessLabels  = input.bool(true, "Mostrar etiquetas", group=grpSess)
+
 // ============================= TIPOS =============================
 type Zone
     box   b
@@ -65,6 +84,12 @@ closedThrough(bottomEdge, topEdge, isBullZone) =>
         mitigationMode == "Cierre" ? close < bottomEdge : low < bottomEdge
     else
         mitigationMode == "Cierre" ? close > topEdge : high > topEdge
+
+lineStyleFromInput(s) =>
+    s == "Sólida" ? line.style_solid : s == "Discontinua" ? line.style_dashed : line.style_dotted
+
+pdhlLineStyle = lineStyleFromInput(pdhlStyleInput)
+sessLineStyle = lineStyleFromInput(sessStyleInput)
 
 // ============================= DETECCIÓN FVG (patrón de 3 velas) =============================
 bullGapUp = low > high[2]
@@ -227,6 +252,89 @@ if array.size(bearIfvgZones) > 0
                 line.delete(z.ce)
             if not na(z.lbl)
                 label.delete(z.lbl)
+
+// ============================= PDH / PDL (día anterior) =============================
+pdHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+pdLow  = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+
+var line  pdhLine = na
+var line  pdlLine = na
+var label pdhLbl  = na
+var label pdlLbl  = na
+
+newDayBar = ta.change(time("D")) != 0
+
+if showPdhl and newDayBar and not na(pdHigh)
+    if not na(pdhLine)
+        line.delete(pdhLine)
+    if not na(pdlLine)
+        line.delete(pdlLine)
+    if not na(pdhLbl)
+        label.delete(pdhLbl)
+    if not na(pdlLbl)
+        label.delete(pdlLbl)
+    pdhLine := line.new(bar_index, pdHigh, bar_index, pdHigh, color=pdhColor, width=pdhlWidth, style=pdhlLineStyle)
+    pdlLine := line.new(bar_index, pdLow, bar_index, pdLow, color=pdlColor, width=pdhlWidth, style=pdhlLineStyle)
+    if showPdhlLabels
+        pdhLbl := label.new(bar_index, pdHigh, "PDH", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pdhColor, size=size.tiny)
+        pdlLbl := label.new(bar_index, pdLow, "PDL", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pdlColor, size=size.tiny)
+
+if showPdhl and not na(pdhLine)
+    line.set_x2(pdhLine, bar_index)
+    line.set_x2(pdlLine, bar_index)
+    if not na(pdhLbl)
+        label.set_x(pdhLbl, bar_index)
+        label.set_x(pdlLbl, bar_index)
+
+// ============================= ALTO / BAJO DE LA SESIÓN INTRADÍA ANTERIOR =============================
+inSession = not na(time(timeframe.period, sessSession, sessTimezone))
+
+var float runSessHigh  = na
+var float runSessLow   = na
+var float prevSessHigh = na
+var float prevSessLow  = na
+var bool  wasInSession = false
+
+sessionStart = inSession and not wasInSession
+
+if sessionStart
+    if not na(runSessHigh)
+        prevSessHigh := runSessHigh
+        prevSessLow  := runSessLow
+    runSessHigh := high
+    runSessLow  := low
+else if inSession
+    runSessHigh := math.max(nz(runSessHigh, high), high)
+    runSessLow  := math.min(nz(runSessLow, low), low)
+
+wasInSession := inSession
+
+var line  sessHLine = na
+var line  sessLLine = na
+var label sessHLbl  = na
+var label sessLLbl  = na
+
+if showSessHl and sessionStart and not na(prevSessHigh)
+    if not na(sessHLine)
+        line.delete(sessHLine)
+    if not na(sessLLine)
+        line.delete(sessLLine)
+    if not na(sessHLbl)
+        label.delete(sessHLbl)
+    if not na(sessLLbl)
+        label.delete(sessLLbl)
+    sessHLine := line.new(bar_index, prevSessHigh, bar_index, prevSessHigh, color=sessHighColor, width=sessWidth, style=sessLineStyle)
+    sessLLine := line.new(bar_index, prevSessLow, bar_index, prevSessLow, color=sessLowColor, width=sessWidth, style=sessLineStyle)
+    if showSessLabels
+        sessHLbl := label.new(bar_index, prevSessHigh, sessLabelName + " H", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sessHighColor, size=size.tiny)
+        sessLLbl := label.new(bar_index, prevSessLow, sessLabelName + " L", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sessLowColor, size=size.tiny)
+
+if showSessHl and not na(sessHLine)
+    line.set_x2(sessHLine, bar_index)
+    line.set_x2(sessLLine, bar_index)
+    if not na(sessHLbl)
+        label.set_x(sessHLbl, bar_index)
+        label.set_x(sessLLbl, bar_index)
 
 // ============================= ALERTAS =============================
 alertcondition(newBullFvg, title="Nuevo FVG alcista", message="Se formó un nuevo Fair Value Gap alcista")
