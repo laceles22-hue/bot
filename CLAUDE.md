@@ -13,7 +13,7 @@ single-file scripts consumed directly by their respective platforms.
 - `indicators/` — Pine Script (`.pine`) indicators for TradingView.
   - `fvg_ifvg.pine` — FVG/IFVG indicator with session high/low tracking.
 - `experts/` — MQL5 (`.mq5`) Expert Advisors for MetaTrader 5.
-  - `RangeBreakoutEA.mq5` — Symbol-agnostic range breakout EA (configurable time window,
+  - `SessionRangeBreakoutEA.mq5` — Symbol-agnostic range breakout EA (configurable time window,
     ATR-based stop loss, R:R take profit, risk-% position sizing off a reference balance,
     weekday filter, one trade per day, forced close time). Defaults are tuned for prop-firm
     style risk management on gold (XAUUSD) and USTEC.
@@ -29,7 +29,7 @@ single-file scripts consumed directly by their respective platforms.
 
 ## Conventions
 
-- One file per indicator/EA, named after what it does (e.g. `RangeBreakoutEA.mq5`).
+- One file per indicator/EA, named after what it does (e.g. `SessionRangeBreakoutEA.mq5`).
 - MQL5 EAs: use `input group "..."` to organize parameters in the input dialog, prefix inputs
   with `Inp`, and default values should make sense for a prop-firm funded-account context
   (conservative risk %, sane ATR-based stops) unless the user specifies otherwise.

@@ -1,8 +1,8 @@
 //+------------------------------------------------------------------+
-//|                                            RangeBreakoutEA.mq5   |
+//|                                     SessionRangeBreakoutEA.mq5    |
 //|         EA de ruptura de rango horario, multi-símbolo (MQL5)     |
 //+------------------------------------------------------------------+
-#property copyright "RangeBreakoutEA"
+#property copyright "SessionRangeBreakoutEA"
 #property version   "1.00"
 #property description "Ruptura de rango horario (hora de servidor). Confirmación por cierre"
 #property description "de vela, SL por ATR, TP por R:R, lotaje por % de riesgo sobre balance"
@@ -58,7 +58,7 @@ input int    InpForceCloseMinute  = 0;     // Minuto de cierre forzado
 input group "===== Trading ====="
 input ulong    InpMagic     = 990101;              // Número mágico
 input int      InpSlippage  = 30;                   // Slippage / desviación máxima (puntos)
-input string   InpComment   = "RangeBreakoutEA";    // Comentario de las órdenes
+input string   InpComment   = "SessionRangeBreakoutEA";    // Comentario de las órdenes
 
 //--- Diagnóstico
 input group "===== Diagnóstico ====="
@@ -211,7 +211,7 @@ bool ComputeRange(const datetime dayStart)
    {
       if(InpDebugLog && !g_rangeFailLogged)
       {
-         PrintFormat("RangeBreakoutEA: sin datos de %s entre %s y %s (CopyHigh=%d CopyLow=%d, error=%d). "
+         PrintFormat("SessionRangeBreakoutEA: sin datos de %s entre %s y %s (CopyHigh=%d CopyLow=%d, error=%d). "
                      "Revisa la profundidad de historial del símbolo/timeframe en el Probador de Estrategias.",
                      EnumToString(InpRangeTF), TimeToString(rangeStart, TIME_DATE|TIME_MINUTES),
                      TimeToString(rangeEnd, TIME_DATE|TIME_MINUTES), n1, n2, GetLastError());
@@ -232,7 +232,7 @@ bool ComputeRange(const datetime dayStart)
    g_rangeLow  = lo;
 
    if(InpDebugLog)
-      PrintFormat("RangeBreakoutEA: rango del %s listo -> High=%.5f Low=%.5f (%d/%d barras %s)",
+      PrintFormat("SessionRangeBreakoutEA: rango del %s listo -> High=%.5f Low=%.5f (%d/%d barras %s)",
                   TimeToString(dayStart, TIME_DATE), hi, lo, n1, n2, EnumToString(InpRangeTF));
 
    return true;
@@ -313,7 +313,7 @@ void OpenTrade(const ENUM_ORDER_TYPE dir)
    double atrBuf[];
    if(CopyBuffer(g_atrHandle, 0, 1, 1, atrBuf) <= 0)
    {
-      PrintFormat("RangeBreakoutEA: operación omitida, no se pudo leer el ATR (buffer no listo todavía, error=%d).",
+      PrintFormat("SessionRangeBreakoutEA: operación omitida, no se pudo leer el ATR (buffer no listo todavía, error=%d).",
                   GetLastError());
       return;
    }
@@ -321,7 +321,7 @@ void OpenTrade(const ENUM_ORDER_TYPE dir)
    double atr = atrBuf[0];
    if(atr <= 0)
    {
-      PrintFormat("RangeBreakoutEA: operación omitida, ATR devuelto = %.5f (¿historial insuficiente para %d periodos?)",
+      PrintFormat("SessionRangeBreakoutEA: operación omitida, ATR devuelto = %.5f (¿historial insuficiente para %d periodos?)",
                   atr, InpATRPeriod);
       return;
    }
@@ -335,7 +335,7 @@ void OpenTrade(const ENUM_ORDER_TYPE dir)
       slDistance = minStopDist;
    if(slDistance <= 0)
    {
-      Print("RangeBreakoutEA: operación omitida, distancia de SL calculada = 0.");
+      Print("SessionRangeBreakoutEA: operación omitida, distancia de SL calculada = 0.");
       return;
    }
 
@@ -362,7 +362,7 @@ void OpenTrade(const ENUM_ORDER_TYPE dir)
    double lots = CalculateLotSize(slDistance, lotReason);
    if(lots <= 0)
    {
-      PrintFormat("RangeBreakoutEA: operación omitida, lote inválido. %s", lotReason);
+      PrintFormat("SessionRangeBreakoutEA: operación omitida, lote inválido. %s", lotReason);
       return;
    }
 
@@ -379,12 +379,12 @@ void OpenTrade(const ENUM_ORDER_TYPE dir)
    if(ok)
    {
       g_tradeTakenToday = true;
-      PrintFormat("RangeBreakoutEA: %s abierta. Lote=%.2f SL=%.5f TP=%.5f",
+      PrintFormat("SessionRangeBreakoutEA: %s abierta. Lote=%.2f SL=%.5f TP=%.5f",
                   (dir == ORDER_TYPE_BUY ? "COMPRA" : "VENTA"), lots, sl, tp);
    }
    else
    {
-      PrintFormat("RangeBreakoutEA: fallo al abrir orden. Retcode=%d %s",
+      PrintFormat("SessionRangeBreakoutEA: fallo al abrir orden. Retcode=%d %s",
                   trade.ResultRetcode(), trade.ResultRetcodeDescription());
    }
 }
@@ -411,7 +411,7 @@ void CheckBreakoutAndEnter(const datetime rangeEndT)
       if(spread > InpMaxSpreadPoints)
       {
          if(InpDebugLog && closedBarTime != g_lastEvalBarLogged)
-            PrintFormat("RangeBreakoutEA: spread %d > InpMaxSpreadPoints %d, entrada bloqueada en %s",
+            PrintFormat("SessionRangeBreakoutEA: spread %d > InpMaxSpreadPoints %d, entrada bloqueada en %s",
                         spread, InpMaxSpreadPoints, TimeToString(closedBarTime, TIME_DATE|TIME_MINUTES));
          g_lastEvalBarLogged = closedBarTime;
          return;
@@ -422,7 +422,7 @@ void CheckBreakoutAndEnter(const datetime rangeEndT)
 
    if(InpDebugLog && closedBarTime != g_lastEvalBarLogged)
    {
-      PrintFormat("RangeBreakoutEA: vela %s cierre=%.5f vs rango [%.5f , %.5f]",
+      PrintFormat("SessionRangeBreakoutEA: vela %s cierre=%.5f vs rango [%.5f , %.5f]",
                   TimeToString(closedBarTime, TIME_DATE|TIME_MINUTES), closedClose, g_rangeLow, g_rangeHigh);
       g_lastEvalBarLogged = closedBarTime;
    }
@@ -440,24 +440,24 @@ int OnInit()
 {
    if(InpRiskPercent <= 0 || InpRiskPercent > 100)
    {
-      Print("RangeBreakoutEA: InpRiskPercent inválido.");
+      Print("SessionRangeBreakoutEA: InpRiskPercent inválido.");
       return INIT_PARAMETERS_INCORRECT;
    }
    if(InpATRPeriod <= 0)
    {
-      Print("RangeBreakoutEA: InpATRPeriod inválido.");
+      Print("SessionRangeBreakoutEA: InpATRPeriod inválido.");
       return INIT_PARAMETERS_INCORRECT;
    }
    if(InpATRMultiplierSL <= 0 || InpRiskReward <= 0)
    {
-      Print("RangeBreakoutEA: InpATRMultiplierSL / InpRiskReward inválidos.");
+      Print("SessionRangeBreakoutEA: InpATRMultiplierSL / InpRiskReward inválidos.");
       return INIT_PARAMETERS_INCORRECT;
    }
    if(InpRangeStartHour < 0 || InpRangeStartHour > 23 || InpRangeEndHour < 0 || InpRangeEndHour > 23 ||
       InpRangeStartMinute < 0 || InpRangeStartMinute > 59 || InpRangeEndMinute < 0 || InpRangeEndMinute > 59 ||
       InpForceCloseHour < 0 || InpForceCloseHour > 23 || InpForceCloseMinute < 0 || InpForceCloseMinute > 59)
    {
-      Print("RangeBreakoutEA: horas/minutos configurados fuera de rango (0-23 / 0-59).");
+      Print("SessionRangeBreakoutEA: horas/minutos configurados fuera de rango (0-23 / 0-59).");
       return INIT_PARAMETERS_INCORRECT;
    }
 
@@ -465,20 +465,20 @@ int OnInit()
    int rangeEndSec   = InpRangeEndHour   * 3600 + InpRangeEndMinute   * 60;
    if(rangeStartSec >= rangeEndSec)
    {
-      Print("RangeBreakoutEA: la hora de inicio del rango debe ser anterior a la de fin ",
+      Print("SessionRangeBreakoutEA: la hora de inicio del rango debe ser anterior a la de fin ",
             "(no se soportan rangos que cruzan medianoche).");
       return INIT_PARAMETERS_INCORRECT;
    }
 
    int forceCloseSec = InpForceCloseHour * 3600 + InpForceCloseMinute * 60;
    if(InpForceCloseEnabled && forceCloseSec <= rangeEndSec)
-      Print("RangeBreakoutEA: AVISO - la hora de cierre forzado es anterior o igual a la hora de fin ",
+      Print("SessionRangeBreakoutEA: AVISO - la hora de cierre forzado es anterior o igual a la hora de fin ",
             "del rango; la EA no podrá abrir operaciones. Revisa InpForceCloseHour/Minute.");
 
    g_atrHandle = iATR(_Symbol, InpConfirmTF, InpATRPeriod);
    if(g_atrHandle == INVALID_HANDLE)
    {
-      Print("RangeBreakoutEA: no se pudo crear el indicador ATR.");
+      Print("SessionRangeBreakoutEA: no se pudo crear el indicador ATR.");
       return INIT_FAILED;
    }
 
@@ -491,7 +491,7 @@ int OnInit()
    g_forceCloseDoneToday = false;
 
    if(InpDebugLog)
-      PrintFormat("RangeBreakoutEA: init OK. Símbolo=%s Rango=%02d:%02d-%02d:%02d (TF %s) "
+      PrintFormat("SessionRangeBreakoutEA: init OK. Símbolo=%s Rango=%02d:%02d-%02d:%02d (TF %s) "
                   "Confirmación=%s ATR(%d)x%.2f RR=%.2f Riesgo=%.2f%% CierreForzado=%02d:%02d (%s) "
                   "Hora de servidor actual=%s",
                   _Symbol, InpRangeStartHour, InpRangeStartMinute, InpRangeEndHour, InpRangeEndMinute,
