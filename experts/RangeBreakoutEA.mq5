@@ -60,6 +60,10 @@ input ulong    InpMagic     = 990101;              // Número mágico
 input int      InpSlippage  = 30;                   // Slippage / desviación máxima (puntos)
 input string   InpComment   = "RangeBreakoutEA";    // Comentario de las órdenes
 
+//--- Diagnóstico
+input group "===== Diagnóstico ====="
+input bool     InpDebugLog  = true;   // Volcar mensajes de diagnóstico al log (recomendado en backtest)
+
 //--- Globales
 CTrade   trade;
 int      g_atrHandle          = INVALID_HANDLE;
@@ -69,6 +73,8 @@ double   g_rangeLow            = 0.0;
 bool     g_rangeReady          = false;
 bool     g_tradeTakenToday     = false;
 bool     g_forceCloseDoneToday = false;
+bool     g_rangeFailLogged     = false; // evita spamear el log si el rango no consigue datos
+datetime g_lastEvalBarLogged   = 0;     // última vela de confirmación ya logueada (solo diagnóstico)
 
 //+------------------------------------------------------------------+
 //| Devuelve la medianoche (hora de servidor) del día que contiene t |
@@ -155,6 +161,8 @@ void ResetDailyState(const datetime dayStart)
    g_rangeReady          = false;
    g_tradeTakenToday      = false;
    g_forceCloseDoneToday = false;
+   g_rangeFailLogged     = false;
+   g_lastEvalBarLogged   = 0;
 }
 
 //+------------------------------------------------------------------+
@@ -200,7 +208,17 @@ bool ComputeRange(const datetime dayStart)
    int n1 = CopyHigh(_Symbol, InpRangeTF, rangeStart, rangeEnd, highs);
    int n2 = CopyLow(_Symbol, InpRangeTF, rangeStart, rangeEnd, lows);
    if(n1 <= 0 || n2 <= 0)
+   {
+      if(InpDebugLog && !g_rangeFailLogged)
+      {
+         PrintFormat("RangeBreakoutEA: sin datos de %s entre %s y %s (CopyHigh=%d CopyLow=%d, error=%d). "
+                     "Revisa la profundidad de historial del símbolo/timeframe en el Probador de Estrategias.",
+                     EnumToString(InpRangeTF), TimeToString(rangeStart, TIME_DATE|TIME_MINUTES),
+                     TimeToString(rangeEnd, TIME_DATE|TIME_MINUTES), n1, n2, GetLastError());
+         g_rangeFailLogged = true;
+      }
       return false;
+   }
 
    double hi = highs[0];
    double lo = lows[0];
@@ -212,6 +230,11 @@ bool ComputeRange(const datetime dayStart)
 
    g_rangeHigh = hi;
    g_rangeLow  = lo;
+
+   if(InpDebugLog)
+      PrintFormat("RangeBreakoutEA: rango del %s listo -> High=%.5f Low=%.5f (%d/%d barras %s)",
+                  TimeToString(dayStart, TIME_DATE), hi, lo, n1, n2, EnumToString(InpRangeTF));
+
    return true;
 }
 
@@ -358,10 +381,23 @@ void CheckBreakoutAndEnter(const datetime rangeEndT)
    {
       long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
       if(spread > InpMaxSpreadPoints)
+      {
+         if(InpDebugLog && closedBarTime != g_lastEvalBarLogged)
+            PrintFormat("RangeBreakoutEA: spread %d > InpMaxSpreadPoints %d, entrada bloqueada en %s",
+                        spread, InpMaxSpreadPoints, TimeToString(closedBarTime, TIME_DATE|TIME_MINUTES));
+         g_lastEvalBarLogged = closedBarTime;
          return;
+      }
    }
 
    double buffer = InpBreakoutBufferPoints * _Point;
+
+   if(InpDebugLog && closedBarTime != g_lastEvalBarLogged)
+   {
+      PrintFormat("RangeBreakoutEA: vela %s cierre=%.5f vs rango [%.5f , %.5f]",
+                  TimeToString(closedBarTime, TIME_DATE|TIME_MINUTES), closedClose, g_rangeLow, g_rangeHigh);
+      g_lastEvalBarLogged = closedBarTime;
+   }
 
    if(closedClose > g_rangeHigh + buffer)
       OpenTrade(ORDER_TYPE_BUY);
@@ -425,6 +461,16 @@ int OnInit()
    g_rangeReady          = false;
    g_tradeTakenToday      = false;
    g_forceCloseDoneToday = false;
+
+   if(InpDebugLog)
+      PrintFormat("RangeBreakoutEA: init OK. Símbolo=%s Rango=%02d:%02d-%02d:%02d (TF %s) "
+                  "Confirmación=%s ATR(%d)x%.2f RR=%.2f Riesgo=%.2f%% CierreForzado=%02d:%02d (%s) "
+                  "Hora de servidor actual=%s",
+                  _Symbol, InpRangeStartHour, InpRangeStartMinute, InpRangeEndHour, InpRangeEndMinute,
+                  EnumToString(InpRangeTF), EnumToString(InpConfirmTF), InpATRPeriod, InpATRMultiplierSL,
+                  InpRiskReward, InpRiskPercent, InpForceCloseHour, InpForceCloseMinute,
+                  (InpForceCloseEnabled ? "activado" : "desactivado"),
+                  TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES|TIME_SECONDS));
 
    return INIT_SUCCEEDED;
 }
