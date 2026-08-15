@@ -379,8 +379,19 @@ void OpenTrade(const ENUM_ORDER_TYPE dir)
    if(ok)
    {
       g_tradeTakenToday = true;
-      PrintFormat("SessionRangeBreakoutEA: %s abierta. Lote=%.2f SL=%.5f TP=%.5f",
-                  (dir == ORDER_TYPE_BUY ? "COMPRA" : "VENTA"), lots, sl, tp);
+
+      double refBalance   = InpUseFixedBalance ? InpFixedBalance : AccountInfoDouble(ACCOUNT_BALANCE);
+      double tickValue    = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tickSize     = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      double actualRiskUSD = lots * (slDistance / tickSize) * tickValue;
+
+      PrintFormat("SessionRangeBreakoutEA: %s abierta. Lote=%.2f SL=%.5f TP=%.5f | "
+                  "riesgo objetivo=%.2f (%.2f%% de %.2f) riesgo real=%.2f (%.2f%%) "
+                  "[tick_value=%.5f tick_size=%.5f slDistance=%.5f]",
+                  (dir == ORDER_TYPE_BUY ? "COMPRA" : "VENTA"), lots, sl, tp,
+                  refBalance * InpRiskPercent / 100.0, InpRiskPercent, refBalance,
+                  actualRiskUSD, (refBalance > 0 ? actualRiskUSD / refBalance * 100.0 : 0),
+                  tickValue, tickSize, slDistance);
    }
    else
    {
