@@ -1,41 +1,91 @@
 # CLAUDE.md
 
-This file gives Claude Code (and other AI assistants) guidance for working in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repository status
+## What this repository is
 
-As of 2026-08-15, **this repository is empty** — it has no commits, no source files, and no
-configuration (no `package.json`, `pyproject.toml`, `go.mod`, etc.). There is currently no
-codebase, build system, test suite, or established convention to document.
+A collection of Pine Script (TradingView) indicators. Currently a single indicator:
+`indicators/fvg_ifvg.pine` — an overlay indicator that detects Fair Value Gaps (FVG) and
+Inverse Fair Value Gaps (IFVG), plus session high/low reference lines (previous day,
+previous NY session, previous London session).
 
-This file is a placeholder. Regenerate/expand it once real code lands — see "Keeping this file
-up to date" below.
+There is no build system, package manager, or test suite — Pine Script is TradingView's
+proprietary scripting language and only runs inside the TradingView chart editor. "Running"
+a script means pasting/loading it into TradingView's Pine Editor and applying it to a chart.
 
-## What to do until real code exists
+## Development workflow
 
-- Don't assume a language, framework, or project layout that hasn't been established yet.
-- If asked to scaffold a new project here, confirm with the user what kind of project `bot` is
-  meant to be (e.g. a Slack/Discord bot, a CLI tool, a web service) before generating files,
-  since the repo name alone doesn't specify this.
-- Once the first real commit(s) land, update every section below from what's actually in the
-  tree — do not leave speculative content in place.
+- Edit `.pine` files directly; there is nothing to install or compile locally.
+- To verify a change, copy the script into TradingView's Pine Editor (Pine Script v6) and
+  check for compiler errors, then apply it to a chart to confirm the visual behavior
+  (boxes, lines, labels render as expected, no runtime errors in the console).
+- There are no automated tests. Validate logic changes by reasoning through bar-by-bar
+  behavior (this is how the existing session-tracking bugs in the git history were fixed —
+  see `git log --oneline` for examples of the reasoning trail) and, where possible, by
+  visually confirming on a chart across a session boundary or weekend gap.
 
-## Sections to fill in once code exists
+## Code conventions specific to this repo
 
-Replace this section with the real details as soon as there's something to describe:
+- Comments and UI-facing strings (input labels, tooltips, group names, plot labels) are
+  written in **Spanish**. Keep new code consistent with this — don't switch to English labels
+  mid-file.
+- Script header uses a boxed `// ===...===` banner comment style to separate major sections
+  (INPUTS, TIPOS, HELPERS, DETECCIÓN, GESTIÓN + MITIGACIÓN, ALERTAS, etc.). Follow this when
+  adding new sections.
+- Inputs are grouped with the `group=` parameter into named sections (`grpFvg`, `grpIfvg`,
+  `grpFilter`, `grpDisplay`, `grpMit`, `grpPdhl`, `grpSess`, `grpLdn`). When adding a new
+  feature with user-configurable options, add a new `grp*` group rather than dropping inputs
+  into an existing unrelated group.
 
-- **Codebase structure** — top-level directories/packages and what each contains.
-- **Development workflow** — how to install dependencies, run the project locally, run the test
-  suite, and lint/format the code (exact commands, not generic advice).
-- **Architecture notes** — key modules, entry points, data flow, and any non-obvious design
-  decisions worth preserving.
-- **Conventions** — naming, file organization, commit/PR style, and anything else contributors
-  (human or AI) should follow consistently.
-- **Branching / CI** — default branch name, required checks, and how PRs get merged.
+## Architecture: `indicators/fvg_ifvg.pine`
 
-## Keeping this file up to date
+The script is one large `indicator()` body organized into independent feature blocks that
+share only the drawing/mitigation pattern below. When modifying one block, the others are
+generally unaffected.
 
-When you add the first meaningful code to this repository, regenerate this file (the `init`
-Claude Code skill does this automatically by scanning the repo) rather than editing this
-placeholder piecemeal. Keep CLAUDE.md in sync with the codebase going forward — update it
-whenever structure, workflows, or conventions change materially.
+**Zone lifecycle pattern (FVG/IFVG):**
+- A `Zone` user-defined type bundles a `box`, an optional midline `line`, an optional
+  `label`, and the zone's `top`/`bottom` prices.
+- Four parallel arrays hold live zones: `bullFvgZones`, `bearFvgZones`, `bullIfvgZones`,
+  `bearIfvgZones`. Each array is capped at `maxZonesPerSide`; oldest zones are shifted out
+  and their drawing objects explicitly deleted (Pine has no garbage collection for
+  boxes/lines/labels — every `box.new`/`line.new`/`label.new` needs a matching `.delete`
+  when the zone is discarded).
+- Detection: a new FVG is the classic 3-candle gap (`low > high[2]` for bullish,
+  `high < low[2]` for bearish), optionally filtered by `minGapAtrMult` against `ta.atr`.
+- Mitigation: `closedThrough()` centralizes the "has price invalidated this zone" check,
+  branching on `mitigationMode` ("Cierre" = candle close must cross fully through; "Mecha" =
+  a wick touch is enough). When an FVG is mitigated it is removed and — if `showIfvg` is on —
+  immediately spawns an opposite-direction IFVG zone in the corresponding IFVG array (bullish
+  FVG mitigation → bearish IFVG, and vice versa). IFVG zones follow the same mitigation check
+  but just get deleted (no further inversion) when `deleteIfvgOnFill` is true.
+- Each of the four zone arrays is walked and managed in its own loop block (right-edge
+  extension via `extendRight`, then mitigation check), iterating **backwards** (`size-1 to 0`)
+  since `array.remove` shifts subsequent indices.
+
+**Session/reference-line pattern (PDH/PDL, NY session, London session):**
+- Three near-identical blocks (previous-day high/low, previous-NY-session high/low,
+  previous-London-session high/low) each follow the same shape: a running high/low
+  accumulator (`runSessHigh`/`runSessLow` etc.) updated while `inSession` is true, reset on
+  `sessionStart`, and snapshotted into `prevSessHigh`/`prevSessLow` on `sessionEnd`. A single
+  persistent `line`/`label` pair is moved (`line.set_x2`, `label.set_x`) rather than recreated
+  every bar, and only fully recreated (`.delete` + `.new`) when a new session's range is
+  captured.
+- `sessionStart`/`sessionEnd` are edge-triggered off `inSession` (derived from
+  `time(timeframe.period, session, timezone)`) combined with a day-ID check
+  (`year*10000+month*100+day` in the session's timezone) — the day-ID check exists
+  specifically to force a reset if a session `wasInSession` flag ever fails to toggle cleanly
+  (e.g. gaps in continuous futures data spanning multiple sessions). See the git history
+  (`e1b1e33`, `a0ec250`) for the bugs this pattern was written to fix — don't regress the
+  day-ID fallback when touching this logic.
+- The previous session's range is snapshotted at `sessionEnd` (not when the *next* session
+  starts), so the reference line appears immediately after the session closes instead of
+  staying blank through the gap.
+- The NY and London blocks are structurally identical; if fixing a bug in one, check whether
+  the same bug exists in the other (and in PDH/PDL, which uses a simpler daily reset instead
+  of a session window).
+
+## Adding a new indicator
+
+Place new `.pine` files under `indicators/`. There's no shared library/import mechanism in
+use yet — each indicator file is self-contained.
