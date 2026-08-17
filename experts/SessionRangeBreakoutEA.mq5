@@ -306,6 +306,24 @@ double CalculateLotSize(const double slDistance, string &reason)
       return 0.0;
    }
 
+   //--- Comprobación cruzada: mismo cálculo pero vía tamaño de contrato, para detectar
+   //    un tick_value/tick_size mal reportado por el bróker (solo diagnóstico, no cambia el lote).
+   if(InpDebugLog)
+   {
+      double contractSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      double lossPerLotAlt = slDistance * contractSize;
+      if(contractSize > 0 && lossPerLotAlt > 0)
+      {
+         double ratio = lossPerLotAlt / lossPerLot;
+         if(ratio > 1.5 || ratio < 0.667)
+            PrintFormat("SessionRangeBreakoutEA: AVISO discrepancia en pérdida/lote -> "
+                        "vía tick_value/tick_size=%.2f vs vía contract_size(%.2f)=%.2f (ratio=%.2fx). "
+                        "Si estos dos no coinciden, tick_value o tick_size del símbolo están mal "
+                        "reportados por el bróker para %s.",
+                        lossPerLot, contractSize, lossPerLotAlt, ratio, _Symbol);
+      }
+   }
+
    double lots = riskMoney / lossPerLot;
    double normalized = NormalizeVolume(lots);
 
