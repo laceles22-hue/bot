@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- La mayoría de las instalaciones de ATAS todavía usan .NET
+         Framework 4.8. Si al compilar te tira error de que las DLL de
+         ATAS son de otra versión, cambiá esto a net6.0-windows o
+         net8.0-windows (fijate qué versión de .NET tiene instalada tu
+         ATAS en Ayuda / About). -->
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>NwogNdogAtas</AssemblyName>
+    <RootNamespace>ATAS.Indicators.Custom</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\nwog_ndog_atas.cs" />
+  </ItemGroup>
+
+  <!--
+    IMPORTANTE: completá las rutas (HintPath) con la carpeta real donde
+    tenés instalado ATAS en tu PC. Por defecto suele ser:
+      C:\Program Files\ATAS Platform\
+    Buscá ahí los archivos ATAS.Indicators.dll, OFT.Rendering.dll y
+    OFT.Attributes.dll. Si alguno no existe con ese nombre exacto en tu
+    instalación, abrí la carpeta y fijate cuáles hay parecidos (a veces
+    cambian de nombre entre versiones) y ajustá el Include/HintPath.
+  -->
+  <ItemGroup>
+    <Reference Include="ATAS.Indicators">
+      <HintPath>C:\Program Files\ATAS Platform\ATAS.Indicators.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ATAS.DataFeedsCore">
+      <HintPath>C:\Program Files\ATAS Platform\ATAS.DataFeedsCore.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.Rendering">
+      <HintPath>C:\Program Files\ATAS Platform\OFT.Rendering.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.Attributes">
+      <HintPath>C:\Program Files\ATAS Platform\OFT.Attributes.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
