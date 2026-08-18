@@ -78,6 +78,9 @@ input bool     UseContinuationEntry = true; // Usar entrada en continuación
 input string   LimitsSettings    = "===== Límites de Operaciones =====";
 input int      MaxDailyTrades    = 3;     // Máximo de operaciones por día (0 = sin límite)
 
+input string   DebugSettings     = "===== Diagnóstico =====";
+input bool     DebugLogs         = true;  // Imprimir logs detallados para diagnosticar por qué no entra
+
 // Variables globales
 datetime lastRangeDay = 0;
 double rangeHigh = 0;
@@ -240,6 +243,12 @@ bool IsNewTradingDay()
       currentDay = todayDate;
       dailyTradesCount = 0; // Resetear contador de operaciones
       Print("Nuevo día de trading. Contador de operaciones reseteado.");
+      if(DebugLogs)
+         Print("[DEBUG] Hora servidor actual: ", TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES),
+               " | Ventana de rango (hora servidor): ", g_rangeStartHour, ":", g_rangeStartMin,
+               " - ", g_rangeEndHour, ":", g_rangeEndMin,
+               " (RangeStartHourUTC=", RangeStartHourUTC, " RangeEndHourUTC=", RangeEndHourUTC,
+               " BrokerGMTOffset=", BrokerGMTOffset, ")");
       return true;
    }
 
@@ -318,7 +327,10 @@ void IdentifyAsianRange()
       }
       else
       {
-         Print("Error al obtener datos de precio. Error=", GetLastError());
+         Print("Error al obtener datos de precio. Error=", GetLastError(),
+               " | rangeStartTime=", TimeToString(rangeStartTime, TIME_DATE|TIME_MINUTES),
+               " rangeEndTime=", TimeToString(rangeEndTime, TIME_DATE|TIME_MINUTES),
+               " (revisa si hay histórico cargado para ese rango de fechas/horas en el Strategy Tester)");
       }
    }
 }
@@ -396,7 +408,12 @@ void DetectBreakout()
             breakoutTime = rates[0].time;
             Print("Breakout alcista detectado");
          }
+         else if(DebugLogs)
+            Print("[DEBUG] Close rompió el rango al alza pero el filtro de volumen no confirmó");
       }
+      else if(DebugLogs)
+         Print("[DEBUG] Close rompió el rango al alza pero no validó con Bandas de Bollinger (high0=",
+               high0, ")");
    }
    // Revisar breakout bajista
    else if(close0 < rangeLow && candleSize0 > rangeSize * 0.15)
@@ -412,7 +429,18 @@ void DetectBreakout()
             breakoutTime = rates[0].time;
             Print("Breakout bajista detectado");
          }
+         else if(DebugLogs)
+            Print("[DEBUG] Close rompió el rango a la baja pero el filtro de volumen no confirmó");
       }
+      else if(DebugLogs)
+         Print("[DEBUG] Close rompió el rango a la baja pero no validó con Bandas de Bollinger (low0=",
+               low0, ")");
+   }
+   else if(DebugLogs && (close0 > rangeHigh || close0 < rangeLow))
+   {
+      Print("[DEBUG] Close fuera del rango (close0=", close0, " rangeHigh=", rangeHigh,
+            " rangeLow=", rangeLow, ") pero la vela es muy pequeña: candleSize0=",
+            DoubleToString(candleSize0, 2), " requerido>", DoubleToString(rangeSize * 0.15, 2));
    }
 }
 
@@ -612,7 +640,12 @@ void EnterTrade()
    }
 
    if(!enterTrade)
+   {
+      if(DebugLogs)
+         Print("[DEBUG] Breakout confirmado (dirección=", breakoutDirection,
+               ") pero ni pullback ni patrón de vela válidos todavía. Esperando siguiente vela.");
       return;
+   }
 
    // Calcular niveles de stop loss y take profit
    double stopLossLevel = 0, takeProfitLevel1 = 0, takeProfitLevel2 = 0;
