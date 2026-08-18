@@ -344,10 +344,13 @@ void DetectBreakout()
    if(!rangeIdentified || rangeSize <= 0)
       return;
 
-   // Obtener datos de las últimas velas
+   // Obtener datos de las últimas velas YA CERRADAS (índice 1 en adelante).
+   // Importante: usar la vela en formación (índice 0 de CopyRates(...,0,N,...)) da
+   // siempre open==close en el modelo de tester "Precios de apertura únicamente",
+   // lo que deja candleSize0 en 0 y bloquea cualquier detección de breakout.
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   int copied = CopyRates(_Symbol, _Period, 0, 2, rates);
+   int copied = CopyRates(_Symbol, _Period, 1, 2, rates);
 
    if(copied != 2)
    {
@@ -376,9 +379,10 @@ void DetectBreakout()
       ArraySetAsSeries(lowerBand, true);
       ArraySetAsSeries(middleBand, true);
 
-      // Copiar datos de bandas de Bollinger
-      bool bbCopied = CopyBuffer(bbHandle, 1, 0, 1, upperBand) > 0 &&
-                     CopyBuffer(bbHandle, 2, 0, 1, lowerBand) > 0;
+      // Copiar datos de bandas de Bollinger de la misma vela cerrada que estamos analizando
+      // (posición 1 = última vela cerrada, en línea con el CopyRates de más arriba)
+      bool bbCopied = CopyBuffer(bbHandle, 1, 1, 1, upperBand) > 0 &&
+                     CopyBuffer(bbHandle, 2, 1, 1, lowerBand) > 0;
 
       if(!bbCopied)
       {
@@ -452,10 +456,12 @@ bool IsVolumeIncreased()
    if(!UseVolume)
       return true;
 
-   // Obtener datos de volumen (tick volume, ya que XAUUSD es un CFD sin volumen real)
+   // Obtener datos de volumen (tick volume, ya que XAUUSD es un CFD sin volumen real).
+   // Se usan velas cerradas: comparar el volumen de una vela aún en formación contra
+   // el promedio de velas completas la subestimaría casi siempre.
    long volume[];
    ArraySetAsSeries(volume, true);
-   int copied = CopyTickVolume(_Symbol, _Period, 0, 6, volume);
+   int copied = CopyTickVolume(_Symbol, _Period, 1, 6, volume);
 
    if(copied != 6)
    {
@@ -485,16 +491,21 @@ void ConfirmBreakout()
    if(!breakoutDetected)
       return;
 
-   // Obtener datos de la última vela
+   // Obtener datos de la última vela YA CERRADA
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   int copied = CopyRates(_Symbol, _Period, 0, 1, rates);
+   int copied = CopyRates(_Symbol, _Period, 1, 1, rates);
 
    if(copied != 1)
    {
       Print("Error al obtener datos de precio. Error=", GetLastError());
       return;
    }
+
+   // Exigir que sea una vela distinta (posterior) a la que generó el breakout;
+   // si no, seguimos esperando a que cierre una vela nueva antes de confirmar
+   if(rates[0].time <= breakoutTime)
+      return;
 
    double close0 = rates[0].close;
 
@@ -517,10 +528,11 @@ void ConfirmBreakout()
 //+------------------------------------------------------------------+
 bool IsValidCandlePattern()
 {
-   // Obtener datos de las últimas velas
+   // Obtener datos de la última vela YA CERRADA (un patrón de vela solo tiene
+   // sentido evaluado sobre una vela terminada, no sobre la que está en formación)
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   int copied = CopyRates(_Symbol, _Period, 0, 1, rates);
+   int copied = CopyRates(_Symbol, _Period, 1, 1, rates);
 
    if(copied != 1)
    {
