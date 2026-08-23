@@ -1,0 +1,218 @@
+//@version=6
+// =====================================================================
+// Estrategia: NAS100 / XAUUSD — Tendencia + Pullback (Riesgo Bajo)
+// ---------------------------------------------------------------------
+// Mercado:        Nasdaq 100 (NAS100/US100) y Oro (XAUUSD). Aplicar el
+//                 script por separado en el gráfico de cada instrumento.
+// Temporalidad:   15 minutos a 1 hora.
+// Nivel de riesgo: Bajo (0.5% del capital por operación por defecto).
+// Capital de referencia: 10,000 USD (solo afecta al tamaño de posición
+//                 simulado en el backtest, vía "initial_capital").
+// Indicadores:    EMA 50 / EMA 200, RSI(14), MACD(12,26,9),
+//                 Bandas de Bollinger (20, 2).
+// Horario:        Sin restricción (24/5) por defecto; incluye un filtro
+//                 de sesión opcional por si se quiere acotar el horario.
+//
+// LÓGICA
+//   Tendencia: EMA50 vs EMA200 define el sesgo direccional. Solo se
+//              buscan largos en tendencia alcista y cortos en bajista.
+//   Entrada:   Pullback del precio hacia la media/banda inferior (o
+//              superior, en cortos) de Bollinger + RSI saliendo de una
+//              zona extrema a favor de la tendencia + MACD confirmando
+//              el giro de momentum (cruce de línea/señal o histograma
+//              cambiando de signo) + vela de confirmación.
+//   Salida:    Stop Loss por ATR y Take Profit por relación
+//              Riesgo/Recompensa (1:2 por defecto), con salida
+//              anticipada si el RSI llega al extremo opuesto o el
+//              precio rompe la EMA50 en contra de la posición.
+//   Gestión:   El tamaño de la posición se calcula para arriesgar un
+//              % fijo del capital en cada operación (no un nº fijo de
+//              contratos). Corte automático de nuevas entradas si se
+//              alcanza la pérdida máxima diaria configurada.
+// =====================================================================
+strategy("NAS100 / XAUUSD - Tendencia + Pullback (Riesgo Bajo)",
+     shorttitle           = "NAS100-XAUUSD Bajo Riesgo",
+     overlay              = true,
+     initial_capital      = 10000,
+     currency             = currency.USD,
+     default_qty_type     = strategy.fixed,
+     default_qty_value    = 1,
+     commission_type      = strategy.commission.percent,
+     commission_value     = 0.02,
+     slippage             = 2,
+     calc_on_every_tick   = false,
+     process_orders_on_close = true)
+
+// ============================= INPUTS: RIESGO =============================
+grpRiesgo       = "Gestión de Riesgo"
+riskPerTradePct = input.float(0.5, "Riesgo por operación (% del capital)", minval=0.1, maxval=5.0, step=0.1, group=grpRiesgo, tooltip="Nivel de riesgo BAJO recomendado: 0.5% - 1%")
+maxDailyLossPct = input.float(2.0, "Pérdida máxima diaria (% del capital)", minval=0.5, maxval=10.0, step=0.5, group=grpRiesgo, tooltip="Al alcanzarse, se bloquean nuevas entradas hasta el siguiente día")
+rrRatio         = input.float(2.0, "Relación Riesgo/Recompensa (R:R)", minval=1.0, maxval=5.0, step=0.5, group=grpRiesgo)
+atrLen          = input.int(14, "Periodo ATR (para el Stop Loss)", minval=1, group=grpRiesgo)
+atrMultSL       = input.float(1.5, "Multiplicador ATR para el Stop Loss", minval=0.5, maxval=5.0, step=0.1, group=grpRiesgo)
+
+// ============================= INPUTS: TENDENCIA =============================
+grpTend    = "Tendencia (Medias Móviles)"
+emaFastLen = input.int(50, "EMA rápida", minval=1, group=grpTend)
+emaSlowLen = input.int(200, "EMA lenta", minval=1, group=grpTend)
+
+// ============================= INPUTS: RSI =============================
+grpRsi          = "RSI"
+rsiLen          = input.int(14, "Periodo RSI", minval=1, group=grpRsi)
+rsiOversold     = input.int(30, "Nivel de sobreventa", minval=1, maxval=50, group=grpRsi)
+rsiOverbought   = input.int(70, "Nivel de sobrecompra", minval=50, maxval=99, group=grpRsi)
+rsiLongTrigger  = input.int(40, "Disparo de entrada en largos (cruce al alza)", minval=1, maxval=50, group=grpRsi)
+rsiShortTrigger = input.int(60, "Disparo de entrada en cortos (cruce a la baja)", minval=50, maxval=99, group=grpRsi)
+
+// ============================= INPUTS: MACD =============================
+grpMacd     = "MACD"
+macdFastLen = input.int(12, "EMA rápida MACD", minval=1, group=grpMacd)
+macdSlowLen = input.int(26, "EMA lenta MACD", minval=1, group=grpMacd)
+macdSigLen  = input.int(9, "Señal MACD", minval=1, group=grpMacd)
+
+// ============================= INPUTS: BOLLINGER =============================
+grpBb  = "Bandas de Bollinger"
+bbLen  = input.int(20, "Periodo", minval=1, group=grpBb)
+bbMult = input.float(2.0, "Desviaciones estándar", minval=0.5, maxval=4.0, step=0.1, group=grpBb)
+
+// ============================= INPUTS: FILTROS Y OPERATIVA =============================
+grpOp             = "Filtros y Operativa"
+allowLong         = input.bool(true, "Permitir posiciones largas", group=grpOp)
+allowShort        = input.bool(true, "Permitir posiciones cortas", group=grpOp)
+useSessionFilter  = input.bool(false, "Restringir a una franja horaria", group=grpOp, tooltip="Desactivado por defecto: operativa 24/5 sin restricción horaria")
+sessionWindow     = input.session("0000-2359", "Franja horaria permitida (HHMM-HHMM)", group=grpOp)
+sessionTimezone   = input.string("America/New_York", "Zona horaria de la franja", group=grpOp)
+flattenOnDayEnd   = input.bool(false, "Cerrar posiciones abiertas al cambio de día", group=grpOp)
+
+// ============================= INDICADORES =============================
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+
+rsiValue = ta.rsi(close, rsiLen)
+
+[macdLine, signalLine, histLine] = ta.macd(close, macdFastLen, macdSlowLen, macdSigLen)
+
+bbBasis = ta.sma(close, bbLen)
+bbDev   = bbMult * ta.stdev(close, bbLen)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+atrValue = ta.atr(atrLen)
+
+// ============================= TENDENCIA =============================
+uptrend   = emaFast > emaSlow
+downtrend = emaFast < emaSlow
+
+// ============================= FILTRO DE SESIÓN =============================
+inSession = not useSessionFilter or not na(time(timeframe.period, sessionWindow, sessionTimezone))
+
+// ============================= CORTE POR PÉRDIDA DIARIA MÁXIMA =============================
+newDay = ta.change(time("D"))
+var float dayStartEquity = na
+if newDay or na(dayStartEquity)
+    dayStartEquity := strategy.equity
+
+dailyPnLPct   = (strategy.equity - dayStartEquity) / dayStartEquity * 100
+dailyLossHit  = dailyPnLPct <= -maxDailyLossPct
+
+// ============================= CONDICIONES DE ENTRADA =============================
+// Pullback: el precio ha retrocedido hasta tocar (o cruzar) la media/banda
+// de Bollinger a favor de la tendencia, en vez de perseguir el precio.
+pullbackLong  = low <= bbBasis or low <= bbLower
+pullbackShort = high >= bbBasis or high >= bbUpper
+
+// RSI saliendo de zona extrema, a favor de la tendencia, sin estar ya
+// en el extremo opuesto.
+rsiTriggerLong  = ta.crossover(rsiValue, rsiLongTrigger) and rsiValue < rsiOverbought
+rsiTriggerShort = ta.crossunder(rsiValue, rsiShortTrigger) and rsiValue > rsiOversold
+
+// MACD confirmando el giro de momentum a favor de la tendencia.
+macdTriggerLong  = ta.crossover(macdLine, signalLine) or (histLine > 0 and histLine[1] <= 0)
+macdTriggerShort = ta.crossunder(macdLine, signalLine) or (histLine < 0 and histLine[1] >= 0)
+
+// Vela de confirmación en la dirección de la entrada.
+candleConfirmLong  = close > open
+candleConfirmShort = close < open
+
+longCondition = allowLong and uptrend and pullbackLong and rsiTriggerLong and macdTriggerLong and
+     candleConfirmLong and inSession and not dailyLossHit and strategy.position_size == 0
+
+shortCondition = allowShort and downtrend and pullbackShort and rsiTriggerShort and macdTriggerShort and
+     candleConfirmShort and inSession and not dailyLossHit and strategy.position_size == 0
+
+// ============================= TAMAÑO DE POSICIÓN (RIESGO FIJO) =============================
+slDistance = math.max(atrValue * atrMultSL, syminfo.mintick * 10)
+tpDistance = slDistance * rrRatio
+
+riskCapitalUsd = strategy.equity * (riskPerTradePct / 100)
+qtyByRisk      = riskCapitalUsd / slDistance
+
+// ============================= ENTRADAS =============================
+var float longSL  = na
+var float longTP  = na
+var float shortSL = na
+var float shortTP = na
+
+if longCondition
+    longSL := close - slDistance
+    longTP := close + tpDistance
+    strategy.entry("Long", strategy.long, qty=qtyByRisk)
+
+if shortCondition
+    shortSL := close + slDistance
+    shortTP := close - tpDistance
+    strategy.entry("Short", strategy.short, qty=qtyByRisk)
+
+// ============================= SALIDAS =============================
+// Salida por señal: RSI llega al extremo opuesto o el precio rompe la
+// EMA rápida en contra de la posición abierta.
+exitLongSignal  = ta.crossover(rsiValue, rsiOverbought) or ta.crossunder(close, emaFast)
+exitShortSignal = ta.crossunder(rsiValue, rsiOversold) or ta.crossover(close, emaFast)
+
+if strategy.position_size > 0
+    strategy.exit("Salir Long", from_entry="Long", stop=longSL, limit=longTP)
+    if exitLongSignal
+        strategy.close("Long", comment="Salida por señal")
+
+if strategy.position_size < 0
+    strategy.exit("Salir Short", from_entry="Short", stop=shortSL, limit=shortTP)
+    if exitShortSignal
+        strategy.close("Short", comment="Salida por señal")
+
+// Cierre opcional de posiciones abiertas al cambio de día (por defecto
+// desactivado, ya que la operativa se definió como 24/5 sin restricción).
+if flattenOnDayEnd and newDay and strategy.position_size != 0
+    strategy.close_all(comment="Cierre por cambio de día")
+
+// ============================= VISUALIZACIÓN =============================
+plot(emaFast, "EMA rápida", color=color.new(color.aqua, 0), linewidth=2)
+plot(emaSlow, "EMA lenta", color=color.new(color.orange, 0), linewidth=2)
+p1 = plot(bbUpper, "Banda superior", color=color.new(color.gray, 40))
+p2 = plot(bbLower, "Banda inferior", color=color.new(color.gray, 40))
+plot(bbBasis, "Banda media", color=color.new(color.gray, 0))
+fill(p1, p2, color=color.new(color.gray, 90))
+
+bgcolor(dailyLossHit ? color.new(color.red, 85) : na, title="Pérdida diaria máxima alcanzada")
+
+plotshape(longCondition, title="Entrada Long", style=shape.triangleup, location=location.belowbar, color=color.new(color.teal, 0), size=size.tiny)
+plotshape(shortCondition, title="Entrada Short", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny)
+
+// ============================= PANEL DE ESTADO =============================
+var table infoTable = table.new(position.top_right, 2, 5, border_width=1)
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Riesgo/operación", text_color=color.white, bgcolor=color.new(color.gray, 60))
+    table.cell(infoTable, 1, 0, str.tostring(riskPerTradePct) + " %", text_color=color.white, bgcolor=color.new(color.gray, 60))
+    table.cell(infoTable, 0, 1, "R:R objetivo", text_color=color.white, bgcolor=color.new(color.gray, 70))
+    table.cell(infoTable, 1, 1, "1:" + str.tostring(rrRatio), text_color=color.white, bgcolor=color.new(color.gray, 70))
+    table.cell(infoTable, 0, 2, "P/L diario", text_color=color.white, bgcolor=color.new(color.gray, 60))
+    table.cell(infoTable, 1, 2, str.tostring(math.round(dailyPnLPct, 2)) + " %", text_color=dailyPnLPct >= 0 ? color.lime : color.red, bgcolor=color.new(color.gray, 60))
+    table.cell(infoTable, 0, 3, "Pérdida máx. diaria", text_color=color.white, bgcolor=color.new(color.gray, 70))
+    table.cell(infoTable, 1, 3, str.tostring(maxDailyLossPct) + " %", text_color=color.white, bgcolor=color.new(color.gray, 70))
+    table.cell(infoTable, 0, 4, "Estado", text_color=color.white, bgcolor=color.new(color.gray, 60))
+    table.cell(infoTable, 1, 4, dailyLossHit ? "DETENIDO" : "ACTIVO", text_color=dailyLossHit ? color.red : color.lime, bgcolor=color.new(color.gray, 60))
+
+// ============================= ALERTAS =============================
+alertcondition(longCondition, title="Entrada Long", message="Señal de ENTRADA LARGA: tendencia alcista + pullback + RSI + MACD confirmados")
+alertcondition(shortCondition, title="Entrada Short", message="Señal de ENTRADA CORTA: tendencia bajista + rebote + RSI + MACD confirmados")
+alertcondition(exitLongSignal, title="Salida por señal (Long)", message="Salida anticipada de posición larga: RSI en sobrecompra o ruptura de EMA rápida")
+alertcondition(exitShortSignal, title="Salida por señal (Short)", message="Salida anticipada de posición corta: RSI en sobreventa o ruptura de EMA rápida")
