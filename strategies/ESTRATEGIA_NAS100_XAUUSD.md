@@ -1,10 +1,49 @@
 # Estrategia personalizada: NAS100 / XAUUSD — Tendencia + Pullback (Riesgo Bajo)
 
-Especificación de la estrategia implementada en
-[`nas100_xauusd_tendencia_pullback.pine`](./nas100_xauusd_tendencia_pullback.pine)
-(Pine Script v6, TradingView). Aplicar el indicador/estrategia por separado en
-el gráfico de cada instrumento (NAS100 y XAUUSD), en temporalidad de 15
-minutos a 1 hora.
+Especificación de la estrategia, disponible en dos versiones con la misma
+lógica:
+
+- [`nas100_xauusd_tendencia_pullback.pine`](./nas100_xauusd_tendencia_pullback.pine)
+  — Pine Script v6 para **TradingView** (indicador/estrategia, útil para
+  backtesting visual y alertas).
+- [`NAS100_XAUUSD_TendenciaPullback_EA.mq5`](./NAS100_XAUUSD_TendenciaPullback_EA.mq5)
+  — **Expert Advisor (bot) en MQL5 para MetaTrader 5**, que opera de forma
+  automática (o solo con alertas, si se desactiva el envío de órdenes).
+
+Aplicar el archivo correspondiente por separado en el gráfico de cada
+instrumento (NAS100 y XAUUSD), en temporalidad de 15 minutos a 1 hora.
+
+## Instalación del bot (EA) en MetaTrader 5
+
+1. Abre MetaTrader 5 → menú **Archivo → Abrir carpeta de datos**.
+2. Copia `NAS100_XAUUSD_TendenciaPullback_EA.mq5` dentro de
+   `MQL5/Experts/` (crea la carpeta si no existe).
+3. Abre **MetaEditor** (F4 desde MT5) y compila el archivo (F7). Debe
+   compilar sin errores; aparecerá `NAS100_XAUUSD_TendenciaPullback_EA.ex5`
+   en la misma carpeta.
+4. Vuelve a MT5, abre el gráfico de **NAS100** (o **XAUUSD**) en
+   temporalidad **M15** o **H1**.
+5. En el **Navegador** (Ctrl+N) → **Asesores Expertos**, arrastra el EA al
+   gráfico.
+6. En la pestaña **Entradas** ajusta los parámetros si quieres (riesgo,
+   R:R, periodos de EMA/RSI/MACD/Bollinger, etc. — ver tabla más abajo).
+7. En la pestaña **Común**, marca **"Permitir el trading en vivo"**.
+8. Activa el botón **AutoTrading** en la barra de herramientas de MT5
+   (debe verse en verde).
+9. Repite el proceso en un segundo gráfico si quieres operar ambos
+   instrumentos (NAS100 y XAUUSD) a la vez — el EA se adjunta por
+   separado en cada gráfico.
+
+**Recomendado antes de usar dinero real:** probarlo primero en una
+**cuenta demo** y/o con el **Probador de Estrategias** de MT5
+(Ctrl+R → seleccionar el EA, símbolo, periodo M15/H1 y rango de fechas)
+para validar el comportamiento con datos históricos de tu bróker.
+
+El EA evalúa las condiciones únicamente al **cierre de cada vela** (no en
+cada tick intrabar) para evitar señales que cambien antes de que la vela
+termine de formarse, e incluye un panel de estado en la esquina del
+gráfico (riesgo por operación, R:R objetivo, P/L del día y si está
+ACTIVO o DETENIDO por la pérdida diaria máxima).
 
 ## 1. Mercado
 
