@@ -89,6 +89,61 @@ esquina del gráfico y ajusta los inputs una vez; ten en cuenta que el
 offset cambia con el horario de verano/invierno tanto del bróker como de
 Londres/Nueva York.
 
+## Si el backtest te está dando muchas pérdidas
+
+La causa más frecuente, con diferencia, es que **`InpNYStart/EndHour` e
+`InpLdnStart/EndHour` no están calibrados a la hora de tu bróker**. Si esos
+horarios no coinciden con la sesión real, el EA calcula "máximo/mínimo de
+sesión" sobre un rango de velas arbitrario, el sesgo de barrido de liquidez
+deja de tener relación con la estructura real del mercado, y las entradas
+pasan a ser básicamente ruido — con exposición real (SL/TP), es decir,
+pérdidas.
+
+Cómo calibrarlo, paso a paso:
+
+1. Añade el EA al gráfico con `InpLogSessionDiagnostics = true` (activado
+   por defecto) y corre un backtest corto (una semana). En la pestaña
+   **Diario/Experts** del Strategy Tester verás:
+   - Al iniciar: la hora de servidor y la hora GMT en ese momento —
+     réstalas para saber el offset actual de tu bróker respecto a GMT.
+   - Cada vez que se cierra una sesión NY o Londres: `Sesión NY cerrada a
+     las ... -> H=... L=...`.
+2. Con el offset del paso anterior, calcula a qué hora de servidor
+   corresponden las 09:30–16:00 de Nueva York y las 08:00–16:30 de
+   Londres, y pon esos valores en `InpNYStart/EndHour(Min)` e
+   `InpLdnStart/EndHour(Min)`. Ojo: Nueva York y Londres no siempre están
+   en horario de verano al mismo tiempo que tu bróker, así que el offset
+   puede variar un par de veces al año.
+3. Vuelve a correr el backtest y revisa en el log que los cierres de
+   sesión ahora caen donde esperas (comparando con las velas del gráfico
+   a esa hora).
+
+Otras causas habituales de pérdidas en backtest, sobre todo en índices/
+acciones CFD:
+
+- **Datos de tick pobres**: muchos brókers no tienen histórico de ticks
+  reales para CFDs de acciones/índices, así que el Strategy Tester genera
+  ticks simulados a partir de M1. Usa el modo *"Cada tick basado en datos
+  reales"* si está disponible y revisa la calidad de los datos (icono de
+  calidad en la barra de resultados del tester).
+- **Modelado de spread/comisión irreal**: por defecto el tester puede usar
+  un spread fijo que no se parece al real de tu bróker en ese símbolo.
+  Configúralo en las propiedades del símbolo del tester o usa "Spread:
+  Actual" si tu bróker lo soporta.
+- **Horario de cotización del símbolo**: muchas acciones CFD solo cotizan
+  en el horario del mercado subyacente (~6.5h/día), no 24h. Si tu ventana
+  de sesión NY no coincide con esas horas, puede quedarse casi siempre sin
+  datos con las que formar el rango.
+- **Periodo de prueba corto o poco representativo**: con `InpMaxPositions`
+  bajo y una sola configuración, unas pocas operaciones perdedoras seguidas
+  pueden parecer "muchas pérdidas" sin ser estadísticamente significativas.
+  Prueba sobre varios meses/años y varios símbolos antes de sacar
+  conclusiones.
+
+Si después de calibrar los horarios sigue perdiendo de forma consistente,
+dime el símbolo, el periodo probado y (si puedes) el reporte del Strategy
+Tester, y reviso la lógica de entrada contigo.
+
 ## Posibles mejoras futuras (no incluidas en esta primera versión)
 
 - Entradas con órdenes límite en el borde de la zona en vez de a mercado.

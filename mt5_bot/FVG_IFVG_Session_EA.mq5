@@ -96,6 +96,7 @@ input bool  InpUseTradingHoursFilter = false;    // Restringir a un horario de t
 input int   InpTradeStartHour        = 0;
 input int   InpTradeEndHour          = 23;
 input bool  InpShowDashboard          = true;    // Mostrar panel de estado en el gráfico
+input bool  InpLogSessionDiagnostics  = true;    // Registrar en el log cada cierre de sesión NY/Londres detectado (para calibrar los horarios)
 
 //====================================================================
 // TIPOS Y VARIABLES GLOBALES
@@ -328,7 +329,11 @@ void UpdatePDHPDL()
 
 // Acumula el máximo/mínimo de una sesión vela a vela y, al terminar la
 // sesión, vuelca el resultado en prevHigh/prevLow (igual que el indicador).
-void UpdateSession(int startH, int startM, int endH, int endM,
+// Si InpLogSessionDiagnostics está activo, deja en el log de Experts cada
+// cierre de sesión detectado — así puedes comprobar, sin adivinar, si los
+// horarios configurados caen realmente dentro de la sesión que quieres
+// capturar (mira las velas/horas del gráfico en esos momentos).
+void UpdateSession(string label, int startH, int startM, int endH, int endM,
                     double &runHigh, double &runLow, bool &wasIn,
                     double &prevHigh, double &prevLow)
 {
@@ -352,6 +357,9 @@ void UpdateSession(int startH, int startM, int endH, int endM,
    {
       prevHigh = runHigh;
       prevLow  = runLow;
+      if(InpLogSessionDiagnostics)
+         PrintFormat("[FVG_IFVG_EA] Sesión %s cerrada a las %s (hora servidor) -> H=%.5f L=%.5f",
+                     label, TimeToString(t1, TIME_DATE | TIME_MINUTES), prevHigh, prevLow);
    }
    wasIn = isIn;
 }
@@ -364,11 +372,11 @@ void UpdateSessions()
    static bool   wasInLdn   = false;
 
    if(InpUseNYSession)
-      UpdateSession(InpNYStartHour, InpNYStartMin, InpNYEndHour, InpNYEndMin,
+      UpdateSession("NY", InpNYStartHour, InpNYStartMin, InpNYEndHour, InpNYEndMin,
                      runNYHigh, runNYLow, wasInNY, g_prevNYHigh, g_prevNYLow);
 
    if(InpUseLondonSession)
-      UpdateSession(InpLdnStartHour, InpLdnStartMin, InpLdnEndHour, InpLdnEndMin,
+      UpdateSession("Londres", InpLdnStartHour, InpLdnStartMin, InpLdnEndHour, InpLdnEndMin,
                      runLdnHigh, runLdnLow, wasInLdn, g_prevLdnHigh, g_prevLdnLow);
 }
 
@@ -553,7 +561,14 @@ int OnInit()
    ArrayFree(g_bullIfvg);
    ArrayFree(g_bearIfvg);
 
-   Print("[FVG_IFVG_EA] Inicializado en ", _Symbol, " ", EnumToString(_Period));
+   PrintFormat("[FVG_IFVG_EA] Inicializado en %s %s | Hora servidor ahora: %s | Hora GMT ahora: %s",
+               _Symbol, EnumToString(_Period),
+               TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS),
+               TimeToString(TimeGMT(), TIME_DATE | TIME_SECONDS));
+   Print("[FVG_IFVG_EA] Compara 'Hora servidor' con 'Hora GMT' de arriba para saber el offset de tu bróker, ",
+         "y ajusta InpNYStart/EndHour e InpLdnStart/EndHour a la hora de SERVIDOR que corresponda a ",
+         "09:30-16:00 hora de Nueva York y 08:00-16:30 hora de Londres respectivamente (recuerda el ",
+         "horario de verano de cada zona).");
    return INIT_SUCCEEDED;
 }
 
