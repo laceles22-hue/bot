@@ -1,0 +1,380 @@
+//@version=6
+// =====================================================================
+// IMG Playbook — Modelo de 5 pasos (SlyPOV7)
+// ---------------------------------------------------------------------
+// Implementación visual del "Step By Step Play Book" de IMG (Infinite
+// Money Glitch): un modelo de 5 pasos + Paso Zero pensado para
+// Reversals y Continuación.
+//
+//   Paso 0 — Ventana horaria fija (5-6am y 11am-12pm hora de NY,
+//            límite estricto de 60 minutos por ventana).
+//   Paso 1 — Marcar el PDH / PDL (High/Low del día anterior).
+//   Paso 2 — Marcar el FVG (Fair Value Gap) de 1H y 15min → tu POI.
+//   Paso 3 — Identificar liquidez: PDH/PDL, EQH/EQL y los High/Low de
+//            las sesiones de Londres, Asia y NY.
+//   Paso 4 — Esperar un Liquidity Sweep o Delivery de un FVG de
+//            1H/15min sobre esa liquidez.
+//   Paso 5 — Esperar un IFVG (Inversion FVG) con volumen en el
+//            timeframe de entrada (3min desde un FVG de 1H, o 1min
+//            desde un FVG de 15min).
+//
+// Reglas ocultas que este script SÍ codifica:
+//   - Invalida el setup si pasan demasiadas velas sin formarse un IFVG
+//     (por defecto 21 velas en 1min / 7 velas en 3min).
+//   - Bolitas naranjas = volumen mayor al de la vela anterior.
+//
+// Reglas ocultas que quedan a criterio del trader (el propio playbook
+// pide "pulir el sexto sentido" viendo los videos de @SlyPOV7, no son
+// mecánicas): leer MSS/ChoCh antes de un IFVG de continuación, no
+// entrar dentro de las cajas de colores, y si un Liquidity Sweep
+// cierra por encima del nivel (reversal) vs. deja mecha (continuación).
+// =====================================================================
+indicator("IMG Playbook [SlyPOV7 — 5 Pasos]", shorttitle="IMG Playbook", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ============================= PASO 0 — VENTANA HORARIA =============================
+grpP0 = "Paso 0 — Ventana Horaria (hora de NY)"
+showP0     = input.bool(true, "Resaltar ventanas de trading", group=grpP0)
+p0Sess1    = input.session("0500-0600", "Ventana 1", group=grpP0)
+p0Sess2    = input.session("1100-1200", "Ventana 2", group=grpP0)
+p0Color    = input.color(color.new(color.blue, 90), "Color de fondo", group=grpP0)
+p0Tz = "America/New_York"
+
+inP0_1 = not na(time(timeframe.period, p0Sess1, p0Tz))
+inP0_2 = not na(time(timeframe.period, p0Sess2, p0Tz))
+inP0 = inP0_1 or inP0_2
+bgcolor(showP0 and inP0 ? p0Color : na, title="Ventana IMG (Paso 0)")
+
+// Recordatorio visual: tu límite son 60 minutos. Si la entrada de IMG
+// no se dio dentro de la ventana resaltada, el playbook indica apagar
+// el gráfico y no forzar el trade.
+var label p0Lbl = na
+p0Start = inP0 and not inP0[1]
+if showP0 and p0Start
+    p0Lbl := label.new(bar_index, high, "IMG — límite 60min", style=label.style_label_down, color=color.new(color.blue, 20), textcolor=color.white, size=size.tiny)
+
+// ============================= PASO 1 — PDH / PDL =============================
+grpP1 = "Paso 1 — PDH / PDL"
+showPdhl  = input.bool(true, "Mostrar PDH/PDL", group=grpP1)
+pdhColor  = input.color(color.new(color.orange, 0), "Color PDH", group=grpP1)
+pdlColor  = input.color(color.new(color.blue, 0), "Color PDL", group=grpP1)
+
+pdHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+pdLow  = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+
+var line  pdhLine = na
+var line  pdlLine = na
+var label pdhLbl  = na
+var label pdlLbl  = na
+
+newDayBar = ta.change(time("D")) != 0
+
+if showPdhl and newDayBar and not na(pdHigh)
+    if not na(pdhLine)
+        line.delete(pdhLine)
+    if not na(pdlLine)
+        line.delete(pdlLine)
+    if not na(pdhLbl)
+        label.delete(pdhLbl)
+    if not na(pdlLbl)
+        label.delete(pdlLbl)
+    pdhLine := line.new(bar_index, pdHigh, bar_index, pdHigh, color=pdhColor, width=1)
+    pdlLine := line.new(bar_index, pdLow, bar_index, pdLow, color=pdlColor, width=1)
+    pdhLbl := label.new(bar_index, pdHigh, "PDH", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pdhColor, size=size.tiny)
+    pdlLbl := label.new(bar_index, pdLow, "PDL", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pdlColor, size=size.tiny)
+
+if showPdhl and not na(pdhLine)
+    line.set_x2(pdhLine, bar_index)
+    line.set_x2(pdlLine, bar_index)
+    label.set_x(pdhLbl, bar_index)
+    label.set_x(pdlLbl, bar_index)
+
+// ============================= PASO 3 — SESIONES (Londres / Asia / NY) =============================
+// Se calculan acá porque el Liquidity Sweep del Paso 4 las necesita
+// como niveles de referencia (BSL/SSL de sesión).
+grpSess = "Paso 3 — Sesiones (Londres / Asia / NY)"
+showSessions = input.bool(true, "Mostrar High/Low de sesiones anteriores", group=grpSess)
+
+ldnSession  = input.session("0800-1630", "Sesión Londres (hora Londres)", group=grpSess)
+asiaSession = input.session("0900-1800", "Sesión Asia (hora Tokio)", group=grpSess)
+nySession   = input.session("0930-1600", "Sesión NY (hora NY)", group=grpSess)
+
+ldnColor  = input.color(color.new(color.purple, 0), "Color Londres", group=grpSess)
+asiaColor = input.color(color.new(color.fuchsia, 0), "Color Asia", group=grpSess)
+nyColor   = input.color(color.new(color.yellow, 0), "Color NY", group=grpSess)
+
+f_sessionTracker(sess, tz) =>
+    inSess = not na(time(timeframe.period, sess, tz))
+    dayId = year(time, tz) * 10000 + month(time, tz) * 100 + dayofmonth(time, tz)
+    var float runHigh = na
+    var float runLow  = na
+    var float prevHigh = na
+    var float prevLow  = na
+    var bool  wasIn = false
+    var int   lastDay = na
+    sessStart = inSess and (not wasIn or dayId != lastDay)
+    sessEnd   = wasIn and not inSess
+    if sessStart
+        runHigh := high
+        runLow  := low
+        lastDay := dayId
+    else if inSess
+        runHigh := math.max(runHigh, high)
+        runLow  := math.min(runLow, low)
+    if sessEnd
+        prevHigh := runHigh
+        prevLow  := runLow
+    wasIn := inSess
+    [prevHigh, prevLow, sessEnd]
+
+[prevLdnHigh, prevLdnLow, ldnSessEnd]   = f_sessionTracker(ldnSession, "Europe/London")
+[prevAsiaHigh, prevAsiaLow, asiaSessEnd] = f_sessionTracker(asiaSession, "Asia/Tokyo")
+[prevNyHigh, prevNyLow, nySessEnd]     = f_sessionTracker(nySession, "America/New_York")
+
+f_drawSessLine(prevHigh, prevLow, doIt, col, tag) =>
+    var line hLine = na
+    var line lLine = na
+    var label hLbl = na
+    var label lLbl = na
+    if showSessions and doIt and not na(prevHigh)
+        if not na(hLine)
+            line.delete(hLine)
+        if not na(lLine)
+            line.delete(lLine)
+        if not na(hLbl)
+            label.delete(hLbl)
+        if not na(lLbl)
+            label.delete(lLbl)
+        hLine := line.new(bar_index, prevHigh, bar_index, prevHigh, color=col, width=1, style=line.style_dashed)
+        lLine := line.new(bar_index, prevLow, bar_index, prevLow, color=col, width=1, style=line.style_dashed)
+        hLbl := label.new(bar_index, prevHigh, tag + " H", style=label.style_label_left, color=color.new(color.white, 100), textcolor=col, size=size.tiny)
+        lLbl := label.new(bar_index, prevLow, tag + " L", style=label.style_label_left, color=color.new(color.white, 100), textcolor=col, size=size.tiny)
+    if showSessions and not na(hLine)
+        line.set_x2(hLine, bar_index)
+        line.set_x2(lLine, bar_index)
+        label.set_x(hLbl, bar_index)
+        label.set_x(lLbl, bar_index)
+
+f_drawSessLine(prevLdnHigh, prevLdnLow, ldnSessEnd, ldnColor, "LDN")
+f_drawSessLine(prevAsiaHigh, prevAsiaLow, asiaSessEnd, asiaColor, "ASIA")
+f_drawSessLine(prevNyHigh, prevNyLow, nySessEnd, nyColor, "NY")
+
+// ============================= PASO 3 — EQH / EQL =============================
+grpEq = "Paso 3 — EQH / EQL"
+showEq       = input.bool(true, "Mostrar Equal Highs / Equal Lows", group=grpEq)
+eqPivotLen   = input.int(3, "Longitud del pivote", minval=1, group=grpEq)
+eqTolPct     = input.float(0.05, "Tolerancia EQH/EQL (%)", minval=0.0, step=0.01, group=grpEq)
+eqColor      = input.color(color.new(color.yellow, 0), "Color EQH/EQL", group=grpEq)
+
+ph = ta.pivothigh(high, eqPivotLen, eqPivotLen)
+pl = ta.pivotlow(low, eqPivotLen, eqPivotLen)
+
+var float lastPH = na
+var int   lastPHBar = na
+var float lastPL = na
+var int   lastPLBar = na
+
+if not na(ph)
+    phBar = bar_index - eqPivotLen
+    if showEq and not na(lastPH) and math.abs(ph - lastPH) / lastPH * 100 <= eqTolPct
+        line.new(lastPHBar, lastPH, phBar, ph, color=eqColor, width=1, style=line.style_dotted)
+        label.new(int(math.round((lastPHBar + phBar) / 2.0)), math.max(ph, lastPH), "EQH", style=label.style_label_down, color=color.new(color.white, 100), textcolor=eqColor, size=size.tiny)
+    lastPH := ph
+    lastPHBar := phBar
+
+if not na(pl)
+    plBar = bar_index - eqPivotLen
+    if showEq and not na(lastPL) and math.abs(pl - lastPL) / lastPL * 100 <= eqTolPct
+        line.new(lastPLBar, lastPL, plBar, pl, color=eqColor, width=1, style=line.style_dotted)
+        label.new(int(math.round((lastPLBar + plBar) / 2.0)), math.min(pl, lastPL), "EQL", style=label.style_label_up, color=color.new(color.white, 100), textcolor=eqColor, size=size.tiny)
+    lastPL := pl
+    lastPLBar := plBar
+
+// ============================= PASO 2 — FVG DE 1H / 15MIN (POI) =============================
+grpP2 = "Paso 2 — FVG 1H / 15min (POI)"
+showFvg1H = input.bool(true, "Mostrar FVG de 1H", group=grpP2)
+showFvg15 = input.bool(true, "Mostrar FVG de 15min", group=grpP2)
+fvg1hBullBg = input.color(color.new(color.teal, 75), "Color FVG 1H alcista", group=grpP2)
+fvg1hBearBg = input.color(color.new(color.red, 75), "Color FVG 1H bajista", group=grpP2)
+fvg15BullBg = input.color(color.new(color.teal, 88), "Color FVG 15m alcista", group=grpP2)
+fvg15BearBg = input.color(color.new(color.red, 88), "Color FVG 15m bajista", group=grpP2)
+maxHtfZones = input.int(15, "Máx. POIs activos por TF", minval=1, group=grpP2)
+
+// NOTA: como el timeframe objetivo (1H/15min) suele ser mayor al del
+// gráfico donde entras (1min/3min), el FVG del lado derecho (aún sin
+// cerrar) puede repintarse hasta que esa vela de 1H/15min cierre —
+// comportamiento estándar de cualquier indicador multi-timeframe.
+type HtfZone
+    box   b
+    label lbl
+    float top
+    float bottom
+    bool  touched
+
+var array<HtfZone> zones1h = array.new<HtfZone>()
+var array<HtfZone> zones15 = array.new<HtfZone>()
+var float lastLeft1h = na
+var float lastLeft15 = na
+
+f_htfFvgCalc() =>
+    bullGap = low > high[2]
+    bearGap = high < low[2]
+    isNew = bullGap or bearGap
+    top = bullGap ? low : bearGap ? low[2] : na
+    bot = bullGap ? high[2] : bearGap ? high : na
+    [isNew, bullGap, top, bot, time[2]]
+
+[isNew1h, isBull1h, top1h, bot1h, tLeft1h] = request.security(syminfo.tickerid, "60", f_htfFvgCalc(), lookahead=barmerge.lookahead_off)
+[isNew15, isBull15, top15, bot15, tLeft15] = request.security(syminfo.tickerid, "15", f_htfFvgCalc(), lookahead=barmerge.lookahead_off)
+
+f_addHtfZone(arr, topV, botV, isBull, bullBg, bearBg, tag, maxZ) =>
+    bcol = isBull ? color.new(color.teal, 0) : color.new(color.red, 0)
+    b = box.new(bar_index, topV, bar_index, botV, border_color=bcol, bgcolor=isBull ? bullBg : bearBg, border_width=1)
+    lbl = label.new(bar_index, isBull ? botV : topV, tag, style=isBull ? label.style_label_up : label.style_label_down, color=color.new(color.white, 100), textcolor=bcol, size=size.tiny)
+    array.push(arr, HtfZone.new(b, lbl, topV, botV, false))
+    if array.size(arr) > maxZ
+        old = array.shift(arr)
+        box.delete(old.b)
+        label.delete(old.lbl)
+
+f_manageHtfZones(arr) =>
+    if array.size(arr) > 0
+        for i = array.size(arr) - 1 to 0
+            z = array.get(arr, i)
+            if not z.touched
+                box.set_right(z.b, bar_index)
+                if high >= z.bottom and low <= z.top
+                    box.set_bgcolor(z.b, color.new(color.gray, 92))
+                    box.set_border_color(z.b, color.new(color.gray, 70))
+                    z.touched := true
+
+newZoneTrigger1h = isNew1h and (na(lastLeft1h) or tLeft1h != lastLeft1h)
+if showFvg1H and newZoneTrigger1h
+    f_addHtfZone(zones1h, top1h, bot1h, isBull1h, fvg1hBullBg, fvg1hBearBg, isBull1h ? "FVG 1H ▲" : "FVG 1H ▼", maxHtfZones)
+    lastLeft1h := tLeft1h
+
+newZoneTrigger15 = isNew15 and (na(lastLeft15) or tLeft15 != lastLeft15)
+if showFvg15 and newZoneTrigger15
+    f_addHtfZone(zones15, top15, bot15, isBull15, fvg15BullBg, fvg15BearBg, isBull15 ? "FVG 15m ▲" : "FVG 15m ▼", maxHtfZones)
+    lastLeft15 := tLeft15
+
+f_manageHtfZones(zones1h)
+f_manageHtfZones(zones15)
+
+// ============================= PASO 4 — LIQUIDITY SWEEP =============================
+grpP4 = "Paso 4 — Liquidity Sweep"
+showSweep    = input.bool(true, "Marcar Liquidity Sweeps sobre BSL/SSL", group=grpP4)
+sweepUpColor = input.color(color.new(color.red, 0), "Color sweep de máximo (BSL)", group=grpP4)
+sweepDnColor = input.color(color.new(color.lime, 0), "Color sweep de mínimo (SSL)", group=grpP4)
+
+// Sweep = la mecha rompe el nivel de liquidez pero la vela CIERRA de
+// vuelta del otro lado. Si cierra más allá del nivel, el playbook dice
+// que suele ser reversal; si solo deja mecha notable, posible
+// continuación — esa lectura queda a tu criterio (ver reglas ocultas).
+f_sweepHigh(level) => not na(level) and high > level and close < level and (na(high[1]) or high[1] <= level)
+f_sweepLow(level)  => not na(level) and low < level and close > level and (na(low[1]) or low[1] >= level)
+
+sweptHigh = showSweep and (f_sweepHigh(pdHigh) or f_sweepHigh(prevNyHigh) or f_sweepHigh(prevLdnHigh) or f_sweepHigh(prevAsiaHigh) or f_sweepHigh(lastPH))
+sweptLow  = showSweep and (f_sweepLow(pdLow) or f_sweepLow(prevNyLow) or f_sweepLow(prevLdnLow) or f_sweepLow(prevAsiaLow) or f_sweepLow(lastPL))
+
+plotshape(sweptHigh ? high : na, title="Liquidity Sweep (BSL)", style=shape.triangledown, location=location.abovebar, color=sweepUpColor, text="LS", size=size.tiny)
+plotshape(sweptLow ? low : na, title="Liquidity Sweep (SSL)", style=shape.triangleup, location=location.belowbar, color=sweepDnColor, text="LS", size=size.tiny)
+
+// ============================= PASO 5 — IFVG + VOLUMEN (TF de entrada) =============================
+grpP5 = "Paso 5 — IFVG + Volumen (timeframe de entrada)"
+showEntryFvg  = input.bool(true, "Mostrar FVG en el timeframe de entrada", group=grpP5)
+showIfvg      = input.bool(true, "Marcar Inversion FVG (IFVG)", group=grpP5)
+showVolDots   = input.bool(true, "Bolitas de volumen (vela > vela anterior)", group=grpP5)
+maxEntryZones = input.int(20, "Máx. FVG/IFVG activos (TF entrada)", minval=1, group=grpP5)
+
+type EntryZone
+    box   b
+    float top
+    float bottom
+    bool  isBull
+
+type IfvgZone
+    box   b
+    label lbl
+    float top
+    float bottom
+
+var array<EntryZone> entryZones = array.new<EntryZone>()
+var array<IfvgZone>  ifvgZones  = array.new<IfvgZone>()
+
+bullGapC = low > high[2]
+bearGapC = high < low[2]
+
+if showEntryFvg and bullGapC
+    b = box.new(bar_index - 2, low, bar_index, high[2], border_color=color.new(color.teal, 40), bgcolor=color.new(color.teal, 90), border_width=1)
+    array.push(entryZones, EntryZone.new(b, low, high[2], true))
+    if array.size(entryZones) > maxEntryZones
+        old = array.shift(entryZones)
+        box.delete(old.b)
+
+if showEntryFvg and bearGapC
+    b = box.new(bar_index - 2, low[2], bar_index, high, border_color=color.new(color.red, 40), bgcolor=color.new(color.red, 90), border_width=1)
+    array.push(entryZones, EntryZone.new(b, low[2], high, false))
+    if array.size(entryZones) > maxEntryZones
+        old = array.shift(entryZones)
+        box.delete(old.b)
+
+var bool ifvgJustFormed = false
+ifvgJustFormed := false
+
+if array.size(entryZones) > 0
+    for i = array.size(entryZones) - 1 to 0
+        z = array.get(entryZones, i)
+        box.set_right(z.b, bar_index)
+        invalidated = z.isBull ? close < z.bottom : close > z.top
+        if invalidated
+            array.remove(entryZones, i)
+            box.delete(z.b)
+            if showIfvg
+                icol = z.isBull ? color.new(color.fuchsia, 0) : color.new(color.lime, 0)
+                ib = box.new(bar_index, z.top, bar_index, z.bottom, border_color=icol, bgcolor=color.new(z.isBull ? color.fuchsia : color.lime, 82), border_width=1)
+                ilbl = label.new(bar_index, z.isBull ? z.top : z.bottom, "IFVG", style=z.isBull ? label.style_label_down : label.style_label_up, color=color.new(color.white, 100), textcolor=icol, size=size.tiny)
+                array.push(ifvgZones, IfvgZone.new(ib, ilbl, z.top, z.bottom))
+                if array.size(ifvgZones) > maxEntryZones
+                    oldi = array.shift(ifvgZones)
+                    box.delete(oldi.b)
+                    label.delete(oldi.lbl)
+                ifvgJustFormed := true
+
+if array.size(ifvgZones) > 0
+    for i = array.size(ifvgZones) - 1 to 0
+        iz = array.get(ifvgZones, i)
+        box.set_right(iz.b, bar_index)
+
+// Bolitas naranjas: volumen mayor al de la vela anterior (regla oculta,
+// pág. 10 del playbook).
+volUp = volume > volume[1]
+plotshape(showVolDots and volUp ? low : na, title="Volumen > vela anterior", style=shape.circle, location=location.belowbar, color=color.new(color.orange, 0), size=size.tiny)
+
+// ============================= REGLAS OCULTAS =============================
+grpHR = "Reglas Ocultas"
+showHiddenWarning = input.bool(true, "Avisar cuando el setup se invalida por tiempo", group=grpHR)
+maxBars1m = input.int(21, "Máx. velas en 1min sin IFVG → invalida", minval=1, group=grpHR)
+maxBars3m = input.int(7, "Máx. velas en 3min sin IFVG → baja probabilidad", minval=1, group=grpHR)
+
+var int barsSinceIfvg = 0
+barsSinceIfvg := ifvgJustFormed ? 0 : barsSinceIfvg + 1
+
+tfSec = timeframe.in_seconds(timeframe.period)
+isChart1m = tfSec > 0 and tfSec <= 60
+isChart3m = tfSec > 60 and tfSec <= 180
+
+warnInvalid  = showHiddenWarning and isChart1m and barsSinceIfvg > maxBars1m
+warnLowProb  = showHiddenWarning and isChart3m and barsSinceIfvg > maxBars3m
+
+var label warnLbl = na
+if warnInvalid or warnLowProb
+    txt = warnInvalid ? "Setup invalidado (>" + str.tostring(maxBars1m) + " velas 1m sin IFVG)" : "Probabilidad baja (>" + str.tostring(maxBars3m) + " velas 3m sin IFVG)"
+    if na(warnLbl)
+        warnLbl := label.new(bar_index, high, txt, style=label.style_label_down, color=color.new(color.orange, 20), textcolor=color.white, size=size.small)
+    else
+        label.set_xy(warnLbl, bar_index, high)
+        label.set_text(warnLbl, txt)
+else
+    if not na(warnLbl)
+        label.delete(warnLbl)
+        warnLbl := na
