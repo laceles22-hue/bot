@@ -1,0 +1,1403 @@
+//@version=6
+indicator("IMG Model", shorttitle="IMG Model", overlay=true,
+     max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ============================================================================
+// INDICADOR: FVG Inversion Model + Setup Checklist (@DodgysDD Strategy)
+// ============================================================================
+// Modelo:
+//   1) Killzones → BSL (máximos) / SSL (mínimos) por sesión
+//   2) Sweep de BSL/SSL → activa búsqueda de FVG
+//   3) Inversión de FVG (IFVG) → señal de entrada
+//   4) Checklist de 6 condiciones con reset 5 velas post-IFVG
+//   5) Auto HTF FVG (15m/1H/4H) en gris transparente, solo en TF <= 5min,
+//      mostrando únicamente la FVG más cercana al precio por timeframe
+// ============================================================================
+
+// --------------------------- INPUTS: KILLZONES -----------------------------
+g_KZ      = "Zonas De Liquidez (Killzones)"
+gmt_tz    = input.string("America/New_York", "Zona Horaria", group = g_KZ)
+txt_color = input.color(color.black, "Color De Texto", group = g_KZ)
+
+use_asia  = input.bool(true, "Asia", inline = "AS", group = g_KZ)
+asia_sess = input.session("2000-0000", "", inline = "AS", group = g_KZ)
+
+use_london  = input.bool(true, "London", inline = "LO", group = g_KZ)
+london_sess = input.session("0200-0500", "", inline = "LO", group = g_KZ)
+
+use_nyam  = input.bool(true, "NY AM", inline = "NA", group = g_KZ)
+nyam_sess = input.session("0930-1100", "", inline = "NA", group = g_KZ)
+
+use_nylu  = input.bool(true, "NY Lunch", inline = "NL", group = g_KZ)
+nylu_sess = input.session("1200-1300", "", inline = "NL", group = g_KZ)
+
+use_nypm  = input.bool(true, "NY PM", inline = "NP", group = g_KZ)
+nypm_sess = input.session("1330-1600", "", inline = "NP", group = g_KZ)
+
+show_kz_box   = input.bool(true, "Mostrar Cajas De Killzone", group = g_KZ)
+show_liq_line = input.bool(true, "Mostrar Líneas BSL / SSL",  group = g_KZ)
+
+// --------------------------- INPUTS: FVG ------------------------------------
+g_FVG          = "Fair Value Gaps"
+show_fvg       = input.bool(true, "Mostrar Fair Value Gaps", group = g_FVG)
+fvg_bull_color = input.color(color.new(color.teal, 75), "Color FVG Alcista", group = g_FVG)
+fvg_bear_color = input.color(color.new(color.red, 75),  "Color FVG Bajista", group = g_FVG)
+fvg_ifvg_color = input.color(color.new(color.orange, 55), "Color Al Invertirse (IFVG)", group = g_FVG)
+max_fvg_track  = input.int(30, "Máximo De FVGs Activas En Memoria", minval = 5, maxval = 100, group = g_FVG)
+
+// --------------------------- INPUTS: MODELO ---------------------------------
+g_MODEL       = "Modelo De Entrada"
+max_wait_bars = input.int(80, "Barras Máximas Esperando La Inversión Tras El Sweep", minval = 5, group = g_MODEL)
+sl_mode       = input.string("Fracaso Stop", "Modo De Stop Loss Sugerido", options = ["Fracaso Stop", "Narrow Stop (IFVG)"], group = g_MODEL)
+show_signals  = input.bool(true, "Mostrar Señales De Entrada", group = g_MODEL)
+show_sltp     = input.bool(true, "Mostrar SL / TP Sugeridos", group = g_MODEL)
+sltp_ext_bars = input.int(15, "Extensión De Líneas SL/TP (Barras)", minval = 1, group = g_MODEL)
+
+// --------------------------- INPUTS: CHECKLIST ----------------------------
+g_CHECK       = "✅ Setup Checklist"
+check_reset   = input.int(5, "Reset Checklist Tras IFVG (velas)", minval = 1, maxval = 50, group = g_CHECK)
+show_check    = input.bool(true, "Mostrar Tabla De Checklist", group = g_CHECK)
+tbl_pos       = input.string("Top Right", "Posición Tabla", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = g_CHECK)
+
+// --------------------------- INPUTS: LIQUIDITY EXTRA -----------------------
+g_LIQX        = "💧 Liquidez Adicional (Checklist)"
+show_eqh_eql  = input.bool(true, "Detectar EQH / EQL", group = g_LIQX)
+eqh_eql_tol   = input.float(0.15, "Tolerancia EQH/EQL (ATR multiplier)", minval = 0.01, step = 0.01, group = g_LIQX)
+show_pdh_pdl  = input.bool(true, "Detectar PDH / PDL", group = g_LIQX)
+show_4h_hl    = input.bool(true, "Detectar 4H High / Low", group = g_LIQX)
+
+// --------------------------- INPUTS: HTF PDA -------------------------------
+g_HTF         = "📈 HTF PDA Delivery"
+show_htf_fvg  = input.bool(true, "Mostrar FVG De Timeframe Mayor", group = g_HTF)
+htf_tf        = input.string("15", "Timeframe HTF (minutos)", options = ["5", "15", "60", "240"], group = g_HTF)
+
+// --------------------------- INPUTS: AUTO HTF FVG (NUEVO) -------------------
+g_AUTOHTF           = "🌫️ Auto HTF FVG (Solo TF ≤ 5min)"
+show_auto_htf       = input.bool(true, "Activar FVGs Automáticas 15m / 1H / 4H", group = g_AUTOHTF)
+auto_htf_transp     = input.int(85, "Transparencia De La Caja", minval = 50, maxval = 95, group = g_AUTOHTF)
+auto_htf_ln_transp  = input.int(30, "Transparencia De La Línea Media", minval = 0, maxval = 90, group = g_AUTOHTF)
+auto_htf_max_track  = input.int(15, "Máximo De FVGs Por Timeframe En Memoria", minval = 3, maxval = 40, group = g_AUTOHTF)
+
+// --------------------------- INPUTS: VOLUME -------------------------------
+g_VOL         = "📊 Volume"
+vol_lookback  = input.int(20, "Lookback Volumen Promedio", minval = 5, group = g_VOL)
+vol_mult      = input.float(1.2, "Multiplicador Volumen (x avg)", minval = 1.0, step = 0.1, group = g_VOL)
+
+// --------------------------- INPUTS: SMT -----------------------------------
+g_SMT         = "⚡ SMT Divergence"
+smt_symbol    = input.symbol("CME_MINI:ES1!", "Símbolo Correlación (MES/ES)", group = g_SMT)
+
+// --------------------------- INPUTS: ALERTS -------------------------------
+g_ALERTS      = "🔔 Alertas"
+alert_sweep   = input.bool(true, "Alerta En Sweep De Liquidez", group = g_ALERTS)
+alert_ifvg    = input.bool(true, "Alerta En IFVG (Entrada)", group = g_ALERTS)
+alert_full    = input.bool(true, "Alerta En Setup Completo (5+/6)", group = g_ALERTS)
+
+// --------------------------- INPUTS: PD ARRAY DELIVERY (NUEVO) -------------
+g_PDA                 = "🎯 PD Array Delivery (Touch HTF FVG + IFVG LTF)"
+enable_pda            = input.bool(true, "Activar Modelo PD Array Delivery", group = g_PDA)
+pda_max_wait          = input.int(7, "Máximo De Velas Entre Touch HTF Y IFVG", minval = 1, maxval = 50, group = g_PDA)
+pda_rr                = input.float(2.0, "Risk:Reward (TP)", minval = 0.5, step = 0.1, group = g_PDA)
+pda_use_5m            = input.bool(true, "Usar FVG 5min Como PD Array", group = g_PDA)
+pda_use_15m           = input.bool(true, "Usar FVG 15min Como PD Array", group = g_PDA)
+pda_use_1h            = input.bool(true, "Usar FVG 1H Como PD Array", group = g_PDA)
+pda_use_4h            = input.bool(true, "Usar FVG 4H Como PD Array", group = g_PDA)
+pda_max_signals       = input.int(5, "Máximo De Señales Visibles En El Gráfico", minval = 1, maxval = 20, group = g_PDA)
+pda_show_zone_marker  = input.bool(true, "Marcar Touch De PD Array (etiqueta pequeña)", group = g_PDA)
+pda_buy_color         = input.color(color.new(color.lime, 0), "Color Señal BUY", group = g_PDA)
+pda_sell_color        = input.color(color.new(color.red, 0), "Color Señal SELL", group = g_PDA)
+alert_pda             = input.bool(true, "Alerta En Señal PD Array IFVG", group = g_PDA)
+
+// ============================================================================
+// TYPES
+// ============================================================================
+type kzRuntime
+    string sess
+    color  col
+    string txt
+    float  hi = na
+    float  lo = na
+    box    bx = na
+
+type liq
+    float price
+    int   barIdx
+    bool  valid = true
+    bool  isHigh
+    line  ln = na
+    label lb = na
+
+type fvgT
+    float top
+    float bottom
+    bool  isBull
+    int   barIdx
+    bool  active = true
+    box   bx = na
+    // --- [NUEVO] usado por el modelo PD Array Delivery para detectar,
+    // en cualquier bar, si ESTA fvg acaba de invertirse (IFVG genérica),
+    // sin depender de pendingSide (que sólo alimenta el modelo original) ---
+    int   invertedBar = na
+    int   invertedDir = na   // 1 = reacción alcista (invBear) | -1 = reacción bajista (invBull)
+
+// --- [NUEVO] contenedor de dibujos para cada señal del modelo PD Array Delivery ---
+type pdaSignalT
+    label lb   = na
+    line  slLn = na
+    line  tpLn = na
+    line  enLn = na
+
+type autoHtfFvg
+    float top
+    float bottom
+    bool  isBull
+    int   leftBar
+    bool  mitigated = false
+    box   bx    = na
+    line  midLn = na
+    label lb    = na
+
+// ============================================================================
+// ESTADO GLOBAL
+// ============================================================================
+var array<kzRuntime> kzArr    = array.new<kzRuntime>()
+var array<liq>        bslPool = array.new<liq>()   // liquidez sobre máximos (Buy Side)
+var array<liq>        sslPool = array.new<liq>()   // liquidez bajo mínimos  (Sell Side)
+var array<liq>        extraBSL = array.new<liq>()  // EQH, PDH, 4HH
+var array<liq>        extraSSL = array.new<liq>()  // EQL, PDL, 4HL
+var array<fvgT>        fvgArr = array.new<fvgT>()
+
+// Pools de FVGs automáticas por timeframe (nuevo)
+var array<autoHtfFvg> afvg15  = array.new<autoHtfFvg>()
+var array<autoHtfFvg> afvg60  = array.new<autoHtfFvg>()
+var array<autoHtfFvg> afvg240 = array.new<autoHtfFvg>()
+
+// Solo se activa el módulo de Auto HTF FVG en timeframes de 1, 2, 3 o 5 minutos
+showAutoHTF = timeframe.isminutes and timeframe.multiplier <= 5
+
+var string pendingSide       = na   // "long" o "short"
+var int    pendingBar        = na
+var float  pendingSweepPrice = na
+
+// --- [NUEVO] Estado del modelo PD Array Delivery ---
+var int                pda_touch_bar = na
+var array<pdaSignalT>  pdaSignals    = array.new<pdaSignalT>()
+
+// Checklist state
+var bool check_liquidity = false
+var bool check_htf       = false
+var bool check_volume    = false
+var bool check_ifvg      = false
+var bool check_targets   = false
+var bool check_smt       = false
+
+var int  ifvg_bar        = na
+var int  bars_since_ifvg = 0
+
+// Swing tracking for EQH/EQL
+var float[] swingHighs = array.new_float(0)
+var float[] swingLows  = array.new_float(0)
+
+// HTF FVG tracking
+var box[] htf_fvg_boxes = array.new_box()
+var int[] htf_fvg_types = array.new_int()
+var int[] htf_fvg_bars  = array.new_int()
+
+// Session tracking for PDH/PDL and 4H H/L
+var float pd_high = na
+var float pd_low  = na
+var float p4h_high = na
+var float p4h_low  = na
+
+// ATR
+atr = ta.atr(14)
+
+if barstate.isfirst
+    if use_asia
+        kzArr.push(kzRuntime.new(asia_sess, color.blue, "Asia"))
+    if use_london
+        kzArr.push(kzRuntime.new(london_sess, color.red, "London"))
+    if use_nyam
+        kzArr.push(kzRuntime.new(nyam_sess, color.green, "NY AM"))
+    if use_nylu
+        kzArr.push(kzRuntime.new(nylu_sess, color.yellow, "NY Lunch"))
+    if use_nypm
+        kzArr.push(kzRuntime.new(nypm_sess, color.purple, "NY PM"))
+
+// ============================================================================
+// FUNCIONES AUXILIARES
+// ============================================================================
+f_new_liq(array<liq> pool, float price, bool isHigh, string labelText, color lineColor) =>
+    l = liq.new(price, bar_index, true, isHigh)
+    if show_liq_line
+        l.ln := line.new(x1 = bar_index, y1 = price, x2 = bar_index, y2 = price, color = lineColor, style = line.style_dashed)
+        l.lb := label.new(x = bar_index, y = price, text = labelText, style = isHigh ? label.style_label_down : label.style_label_up, color = color.new(color.white, 100), textcolor = lineColor, size = size.small)
+    pool.push(l)
+    if pool.size() > 20
+        old = pool.shift()
+        if not na(old.ln)
+            old.ln.delete()
+        if not na(old.lb)
+            old.lb.delete()
+
+f_extend_pool(array<liq> pool) =>
+    if pool.size() > 0
+        for i = 0 to pool.size() - 1
+            l = pool.get(i)
+            if l.valid and not na(l.ln)
+                l.ln.set_x2(bar_index)
+                l.lb.set_x(bar_index)
+
+f_check_sweep(array<liq> pool, bool isHigh) =>
+    int hitIdx = -1
+    if pool.size() > 0
+        for i = pool.size() - 1 to 0
+            l = pool.get(i)
+            if l.valid
+                if isHigh and high > l.price
+                    l.valid := false
+                    if not na(l.ln)
+                        l.ln.set_x2(bar_index)
+                    hitIdx := i
+                if (not isHigh) and low < l.price
+                    l.valid := false
+                    if not na(l.ln)
+                        l.ln.set_x2(bar_index)
+                    hitIdx := i
+    hitIdx
+
+f_nearest_opposite(array<liq> pool, bool wantHigherThanRef, float refPrice) =>
+    float best = na
+    if pool.size() > 0
+        for i = 0 to pool.size() - 1
+            l = pool.get(i)
+            if l.valid
+                if wantHigherThanRef and l.price > refPrice
+                    if na(best) or l.price < best
+                        best := l.price
+                if (not wantHigherThanRef) and l.price < refPrice
+                    if na(best) or l.price > best
+                        best := l.price
+    best
+
+f_any_swept_recent(array<liq> pool, int maxBars) =>
+    bool result = false
+    if pool.size() > 0
+        for i = 0 to pool.size() - 1
+            l = pool.get(i)
+            if not l.valid and (bar_index - l.barIdx) <= maxBars
+                result := true
+                break
+    result
+
+// --- Funciones para Auto HTF FVG (nuevo) ---
+
+// OHLC de un timeframe mayor (se llama siempre, sin condicionales, como exige Pine)
+f_htf_ohlc(simple string tf) =>
+    h = request.security(syminfo.tickerid, tf, high,  lookahead = barmerge.lookahead_on)
+    l = request.security(syminfo.tickerid, tf, low,   lookahead = barmerge.lookahead_on)
+    c = request.security(syminfo.tickerid, tf, close, lookahead = barmerge.lookahead_on)
+    o = request.security(syminfo.tickerid, tf, open,  lookahead = barmerge.lookahead_on)
+    [h, l, c, o]
+
+// Gestiona un pool de FVGs de un timeframe: mitigación, límite, y dibuja
+// SOLO la más cercana al precio actual (gris transparente + línea media punteada)
+f_manage_auto_htf(array<autoHtfFvg> arr, string tfLabel) =>
+    // 1) Mitigación (invalidación) + limpieza
+    if arr.size() > 0
+        for i = arr.size() - 1 to 0
+            e = arr.get(i)
+            if not e.mitigated
+                invalidated = e.isBull ? close < e.bottom : close > e.top
+                if invalidated
+                    e.mitigated := true
+            if e.mitigated
+                if not na(e.bx)
+                    e.bx.delete()
+                if not na(e.midLn)
+                    e.midLn.delete()
+                if not na(e.lb)
+                    e.lb.delete()
+                arr.remove(i)
+
+    // 2) Límite de memoria
+    if arr.size() > auto_htf_max_track
+        old = arr.shift()
+        if not na(old.bx)
+            old.bx.delete()
+        if not na(old.midLn)
+            old.midLn.delete()
+        if not na(old.lb)
+            old.lb.delete()
+
+    // 3) Buscar la FVG activa más cercana al precio
+    int   nearestIdx  = -1
+    float nearestDist = na
+    if arr.size() > 0
+        for i = 0 to arr.size() - 1
+            e = arr.get(i)
+            d = close > e.top ? close - e.top : (close < e.bottom ? e.bottom - close : 0.0)
+            if na(nearestDist) or d < nearestDist
+                nearestDist := d
+                nearestIdx  := i
+
+    // 4) Dibujar SOLO la más cercana; borrar visuales de las demás
+    //    (se borra y se vuelve a crear cada bar en vez de "actualizar" con
+    //    set_right/set_x/set_y, para evitar el error de tipos incompatibles
+    //    entre las ramas if/else: "series label; void")
+    if arr.size() > 0
+        for i = 0 to arr.size() - 1
+            e = arr.get(i)
+            if i == nearestIdx
+                midY = (e.top + e.bottom) / 2.0
+
+                if not na(e.bx)
+                    e.bx.delete()
+                if not na(e.midLn)
+                    e.midLn.delete()
+                if not na(e.lb)
+                    e.lb.delete()
+
+                e.bx    := box.new(left = e.leftBar, top = e.top, right = bar_index, bottom = e.bottom, bgcolor = color.new(color.gray, auto_htf_transp), border_color = color.new(color.gray, 60))
+                e.midLn := line.new(x1 = e.leftBar, y1 = midY, x2 = bar_index, y2 = midY, color = color.new(color.gray, auto_htf_ln_transp), style = line.style_dashed)
+                e.lb    := label.new(x = bar_index, y = midY, text = tfLabel, style = label.style_label_left, color = color.new(color.gray, 100), textcolor = color.gray, size = size.tiny)
+            else
+                if not na(e.bx)
+                    e.bx.delete()
+                    e.bx := na
+                if not na(e.midLn)
+                    e.midLn.delete()
+                    e.midLn := na
+                if not na(e.lb)
+                    e.lb.delete()
+                    e.lb := na
+
+// ============================================================================
+// 1) KILLZONES → construye/actualiza hi/lo de sesión y al cerrar guarda BSL/SSL
+// ============================================================================
+if kzArr.size() > 0
+    for i = 0 to kzArr.size() - 1
+        k = kzArr.get(i)
+        t      = not na(time("", k.sess, gmt_tz))
+        t_prev = not na(time("", k.sess, gmt_tz, bars_back = 1))
+
+        if t and not t_prev
+            k.hi := high
+            k.lo := low
+            if show_kz_box
+                k.bx := box.new(left = bar_index, top = high, right = bar_index, bottom = low, bgcolor = color.new(k.col, 85), border_color = color.new(k.col, 40), text = k.txt, text_color = txt_color, text_size = size.tiny)
+        else if t
+            k.hi := math.max(k.hi, high)
+            k.lo := math.min(k.lo, low)
+            if show_kz_box and not na(k.bx)
+                k.bx.set_top(k.hi)
+                k.bx.set_bottom(k.lo)
+                k.bx.set_right(bar_index)
+
+        if (not t) and t_prev
+            f_new_liq(bslPool, k.hi, true, "BSL", color.black)
+            f_new_liq(sslPool, k.lo, false, "SSL", color.black)
+
+f_extend_pool(bslPool)
+f_extend_pool(sslPool)
+
+// ============================================================================
+
+// ============================================================================
+// 1c) DETECTAR PDH / PDL Y 4H HIGH/LOW
+// ============================================================================
+new_day = ta.change(time("D")) != 0
+new_4h  = ta.change(time("240")) != 0
+
+if new_day
+    pd_high := high[1]
+    pd_low  := low[1]
+
+if new_4h
+    p4h_high := high[1]
+    p4h_low  := low[1]
+
+pd_high := new_day ? high[1] : math.max(nz(pd_high), high)
+pd_low  := new_day ? low[1]  : math.min(nz(pd_low), low)
+p4h_high := new_4h ? high[1] : math.max(nz(p4h_high), high)
+p4h_low  := new_4h ? low[1]  : math.min(nz(p4h_low), low)
+
+if show_pdh_pdl and new_day and not na(pd_high[1])
+    f_new_liq(extraBSL, pd_high[1], true, "PDH", color.black)
+    f_new_liq(extraSSL, pd_low[1], false, "PDL", color.black)
+
+if show_4h_hl and new_4h and not na(p4h_high[1])
+    f_new_liq(extraBSL, p4h_high[1], true, "4HH", color.purple)
+    f_new_liq(extraSSL, p4h_low[1], false, "4HL", color.purple)
+
+// ============================================================================
+// 2) DETECCIÓN DE SWEEP → activa búsqueda de FVG
+// ============================================================================
+bslHit = f_check_sweep(bslPool, true)
+extraBslHit = f_check_sweep(extraBSL, true)
+
+if bslHit >= 0 or extraBslHit >= 0
+    pendingSide       := "short"
+    pendingBar        := bar_index
+    pendingSweepPrice := bslHit >= 0 ? bslPool.get(bslHit).price : extraBSL.get(extraBslHit).price
+
+sslHit = f_check_sweep(sslPool, false)
+extraSslHit = f_check_sweep(extraSSL, false)
+
+if sslHit >= 0 or extraSslHit >= 0
+    pendingSide       := "long"
+    pendingBar        := bar_index
+    pendingSweepPrice := sslHit >= 0 ? sslPool.get(sslHit).price : extraSSL.get(extraSslHit).price
+
+// Expira la espera
+if not na(pendingBar) and (bar_index - pendingBar > max_wait_bars)
+    pendingSide := na
+    pendingBar  := na
+
+// ============================================================================
+// 3) DETECCIÓN DE FAIR VALUE GAPS (3 velas)
+// ============================================================================
+isBullFVG = low > high[2]
+isBearFVG = high < low[2]
+
+if isBullFVG
+    fvgTop    = low
+    fvgBottom = high[2]
+    f = fvgT.new(fvgTop, fvgBottom, true, bar_index)
+    if show_fvg
+        f.bx := box.new(left = bar_index[2], top = fvgTop, right = bar_index, bottom = fvgBottom, bgcolor = fvg_bull_color, border_color = color.new(fvg_bull_color, 0))
+    fvgArr.push(f)
+
+if isBearFVG
+    fvgTop    = low[2]
+    fvgBottom = high
+    f = fvgT.new(fvgTop, fvgBottom, false, bar_index)
+    if show_fvg
+        f.bx := box.new(left = bar_index[2], top = fvgTop, right = bar_index, bottom = fvgBottom, bgcolor = fvg_bear_color, border_color = color.new(fvg_bear_color, 0))
+    fvgArr.push(f)
+
+if fvgArr.size() > max_fvg_track
+    old = fvgArr.shift()
+    if not na(old.bx)
+        old.bx.delete()
+
+// ============================================================================
+// 4) HTF FVG DETECTION (PDA Delivery)
+// ============================================================================
+htf_high = request.security(syminfo.tickerid, htf_tf, high, lookahead = barmerge.lookahead_on)
+htf_low  = request.security(syminfo.tickerid, htf_tf, low, lookahead = barmerge.lookahead_on)
+htf_close = request.security(syminfo.tickerid, htf_tf, close, lookahead = barmerge.lookahead_on)
+htf_open = request.security(syminfo.tickerid, htf_tf, open, lookahead = barmerge.lookahead_on)
+
+htf_bullFVG = htf_low[2] > htf_high[0] and htf_close[1] > htf_open[1]
+htf_bearFVG = htf_high[2] < htf_low[0] and htf_close[1] < htf_open[1]
+
+if (htf_bullFVG or htf_bearFVG) and show_htf_fvg
+    htfTop = htf_bullFVG ? htf_low[2] : htf_high[2]
+    htfBottom = htf_bullFVG ? htf_high[0] : htf_low[0]
+    htfColor = htf_bullFVG ? color.new(color.teal, 85) : color.new(color.maroon, 85)
+
+    array.unshift(htf_fvg_boxes, box.new(bar_index - 2, htfTop, bar_index, htfBottom, bgcolor = htfColor, border_color = htfColor))
+    array.unshift(htf_fvg_types, htf_bullFVG ? 1 : -1)
+    array.unshift(htf_fvg_bars, bar_index - 2)
+
+// Extend HTF FVGs
+if array.size(htf_fvg_boxes) > 0
+    for i = array.size(htf_fvg_boxes) - 1 to 0
+        array.get(htf_fvg_boxes, i).set_right(bar_index)
+        if bar_index - array.get(htf_fvg_bars, i) > 50
+            array.get(htf_fvg_boxes, i).delete()
+            array.remove(htf_fvg_boxes, i)
+            array.remove(htf_fvg_types, i)
+            array.remove(htf_fvg_bars, i)
+
+// ============================================================================
+// 4b) AUTO HTF FVG (15m / 1H / 4H) — solo en timeframes <= 5 minutos,
+//     dibuja únicamente la FVG más cercana al precio por timeframe
+// ============================================================================
+// Los request.security se llaman SIEMPRE (sin condicional), tal como exige Pine
+[h15, l15, c15, o15]     = f_htf_ohlc("15")
+[h60, l60, c60, o60]     = f_htf_ohlc("60")
+[h240, l240, c240, o240] = f_htf_ohlc("240")
+
+if showAutoHTF and show_auto_htf
+    // --- 15 minutos ---
+    bull15 = l15[2] > h15[0] and c15[1] > o15[1]
+    bear15 = h15[2] < l15[0] and c15[1] < o15[1]
+    if bull15 or bear15
+        top15    = bull15 ? l15[2] : h15[2]
+        bottom15 = bull15 ? h15[0] : l15[0]
+        afvg15.push(autoHtfFvg.new(top15, bottom15, bull15, bar_index - 2))
+    f_manage_auto_htf(afvg15, "15m")
+
+    // --- 1 hora ---
+    bull60 = l60[2] > h60[0] and c60[1] > o60[1]
+    bear60 = h60[2] < l60[0] and c60[1] < o60[1]
+    if bull60 or bear60
+        top60    = bull60 ? l60[2] : h60[2]
+        bottom60 = bull60 ? h60[0] : l60[0]
+        afvg60.push(autoHtfFvg.new(top60, bottom60, bull60, bar_index - 2))
+    f_manage_auto_htf(afvg60, "1H")
+
+    // --- 4 horas ---
+    bull240 = l240[2] > h240[0] and c240[1] > o240[1]
+    bear240 = h240[2] < l240[0] and c240[1] < o240[1]
+    if bull240 or bear240
+        top240    = bull240 ? l240[2] : h240[2]
+        bottom240 = bull240 ? h240[0] : l240[0]
+        afvg240.push(autoHtfFvg.new(top240, bottom240, bull240, bar_index - 2))
+    f_manage_auto_htf(afvg240, "4H")
+
+// ============================================================================
+// 5) SMT DIVERGENCE
+// ============================================================================
+smt_close = request.security(smt_symbol, timeframe.period, close)
+
+smt_high = ta.pivothigh(smt_close, 5, 5)
+smt_low  = ta.pivotlow(smt_close, 5, 5)
+price_high = ta.pivothigh(close, 5, 5)
+price_low  = ta.pivotlow(close, 5, 5)
+
+bullish_smt = not na(smt_low) and not na(price_low) and price_low < price_low[1] and smt_low > smt_low[1]
+bearish_smt = not na(smt_high) and not na(price_high) and price_high > price_high[1] and smt_high < smt_high[1]
+
+smt_active = bullish_smt or bearish_smt
+
+// ============================================================================
+// 6) VOLUME ANALYSIS
+// ============================================================================
+avg_vol = ta.sma(volume, vol_lookback)
+vol_spike = volume > avg_vol * vol_mult
+
+// ============================================================================
+// 7) GESTIÓN DE FVGs + INVERSIÓN (IFVG) + ENTRADA + CHECKLIST
+// ============================================================================
+ifvg_detected = false
+ifvg_direction = 0  // 1 = long, -1 = short
+
+if fvgArr.size() > 0
+    for i = 0 to fvgArr.size() - 1
+        f = fvgArr.get(i)
+        if f.active
+            if not na(f.bx)
+                f.bx.set_right(bar_index)
+
+            invBull = f.isBull and (close < f.bottom)        // FVG alcista invertida a la baja
+            invBear = (not f.isBull) and (close > f.top)     // FVG bajista invertida al alza
+
+            if invBull or invBear
+                f.active := false
+                if not na(f.bx)
+                    f.bx.set_bgcolor(fvg_ifvg_color)
+
+                // --- [NUEVO] Tracking genérico de IFVG (independiente del modelo de sweep) ---
+                f.invertedBar := bar_index
+                f.invertedDir := invBear ? 1 : -1
+
+                // LONG: SSL barrida + FVG bajista invertida al alza
+                if invBear and pendingSide == "long" and f.barIdx > pendingBar
+                    slPrice = sl_mode == "Narrow Stop (IFVG)" ? f.bottom : low
+                    tp      = f_nearest_opposite(bslPool, true, close)
+
+                    if show_signals
+                        label.new(x = bar_index, y = low, text = "▲ LONG\n(IFVG)", style = label.style_label_up, color = color.new(color.green, 0), textcolor = color.white, size = size.small)
+                    if show_sltp
+                        line.new(x1 = bar_index, y1 = slPrice, x2 = bar_index + sltp_ext_bars, y2 = slPrice, color = color.red, style = line.style_dashed, width = 1)
+                        if not na(tp)
+                            line.new(x1 = bar_index, y1 = tp, x2 = bar_index + sltp_ext_bars, y2 = tp, color = color.green, style = line.style_dashed, width = 1)
+
+                    if alert_ifvg
+                        alert("🟢 LONG: IFVG bajista tras sweep SSL (" + syminfo.ticker + ")", alert.freq_once_per_bar_close)
+
+                    pendingSide := na
+                    pendingBar  := na
+                    ifvg_detected := true
+                    ifvg_direction := 1
+
+                // SHORT: BSL barrida + FVG alcista invertida a la baja
+                if invBull and pendingSide == "short" and f.barIdx > pendingBar
+                    slPrice = sl_mode == "Narrow Stop (IFVG)" ? f.top : high
+                    tp      = f_nearest_opposite(sslPool, false, close)
+
+                    if show_signals
+                        label.new(x = bar_index, y = high, text = "▼ SHORT\n(IFVG)", style = label.style_label_down, color = color.new(color.red, 0), textcolor = color.white, size = size.small)
+                    if show_sltp
+                        line.new(x1 = bar_index, y1 = slPrice, x2 = bar_index + sltp_ext_bars, y2 = slPrice, color = color.red, style = line.style_dashed, width = 1)
+                        if not na(tp)
+                            line.new(x1 = bar_index, y1 = tp, x2 = bar_index + sltp_ext_bars, y2 = tp, color = color.green, style = line.style_dashed, width = 1)
+
+                    if alert_ifvg
+                        alert("🔴 SHORT: IFVG alcista tras sweep BSL (" + syminfo.ticker + ")", alert.freq_once_per_bar_close)
+
+                    pendingSide := na
+                    pendingBar  := na
+                    ifvg_detected := true
+                    ifvg_direction := -1
+
+// ============================================================================
+// 8) CHECKLIST LOGIC + RESET
+// ============================================================================
+
+// Update IFVG tracking
+if ifvg_detected
+    ifvg_bar := bar_index
+    bars_since_ifvg := 0
+else if not na(ifvg_bar)
+    bars_since_ifvg := bar_index - ifvg_bar
+
+// Reset checklist after N bars post-IFVG
+if bars_since_ifvg >= check_reset and not na(ifvg_bar)
+    check_liquidity := false
+    check_htf       := false
+    check_volume    := false
+    check_ifvg      := false
+    check_targets   := false
+    check_smt       := false
+    ifvg_bar        := na
+    bars_since_ifvg := 0
+
+// --- CHECK 1: LIQUIDITY SWEEP ---
+sweep_bsl = f_any_swept_recent(bslPool, 10)
+sweep_ssl = f_any_swept_recent(sslPool, 10)
+sweep_extra_bsl = f_any_swept_recent(extraBSL, 10)
+sweep_extra_ssl = f_any_swept_recent(extraSSL, 10)
+any_sweep = sweep_bsl or sweep_ssl or sweep_extra_bsl or sweep_extra_ssl
+
+if any_sweep
+    check_liquidity := true
+
+// --- CHECK 2: HTF PDA DELIVERY ---
+htf_delivery = false
+if array.size(htf_fvg_boxes) > 0
+    for i = 0 to array.size(htf_fvg_boxes) - 1
+        htfTop = array.get(htf_fvg_boxes, i).get_top()
+        htfBottom = array.get(htf_fvg_boxes, i).get_bottom()
+        if (low <= htfTop and high >= htfBottom) or (close >= htfBottom and close <= htfTop)
+            htf_delivery := true
+            break
+
+if htf_delivery
+    check_htf := true
+
+// --- CHECK 3: VOLUME ---
+if vol_spike
+    check_volume := true
+
+// --- CHECK 4: IFVG ---
+if ifvg_detected
+    check_ifvg := true
+
+// --- CHECK 5: CLEAR TARGETS ---
+clear_targets = false
+if ifvg_direction == 1  // Long: look for BSL above
+    if array.size(bslPool) > 0
+        for i = 0 to array.size(bslPool) - 1
+            if bslPool.get(i).valid and bslPool.get(i).price > close
+                clear_targets := true
+                break
+    if not clear_targets and array.size(extraBSL) > 0
+        for i = 0 to array.size(extraBSL) - 1
+            if extraBSL.get(i).valid and extraBSL.get(i).price > close
+                clear_targets := true
+                break
+
+if ifvg_direction == -1  // Short: look for SSL below
+    if array.size(sslPool) > 0
+        for i = 0 to array.size(sslPool) - 1
+            if sslPool.get(i).valid and sslPool.get(i).price < close
+                clear_targets := true
+                break
+    if not clear_targets and array.size(extraSSL) > 0
+        for i = 0 to array.size(extraSSL) - 1
+            if extraSSL.get(i).valid and extraSSL.get(i).price < close
+                clear_targets := true
+                break
+
+if clear_targets
+    check_targets := true
+
+// --- CHECK 6: SMT ---
+if smt_active
+    check_smt := true
+
+// ============================================================================
+// 9) GRADE CALCULATION
+// ============================================================================
+grade_score = (check_liquidity ? 1 : 0) + (check_htf ? 1 : 0) + (check_volume ? 1 : 0) +
+              (check_ifvg ? 1 : 0) + (check_targets ? 1 : 0) + (check_smt ? 1 : 0)
+
+grade_text = grade_score == 6 ? "A+" :
+             grade_score == 5 ? "A" :
+             grade_score == 4 ? "B+" :
+             grade_score == 3 ? "B" :
+             grade_score == 2 ? "C+" : "C"
+
+grade_color = grade_score >= 5 ? color.green :
+              grade_score >= 3 ? color.yellow : color.red
+
+// Full setup alert
+if grade_score >= 5 and not (check_liquidity[1] and check_htf[1] and check_volume[1] and check_ifvg[1] and check_targets[1])
+    if alert_full
+        alert("🎯 FULL SETUP! Grade: " + grade_text + " (" + str.tostring(grade_score) + "/6)", alert.freq_once_per_bar)
+
+// ============================================================================
+// 11) PLOTS & VISUALS
+// ============================================================================
+
+// IFVG markers
+plotshape(ifvg_detected and ifvg_direction == 1, title = "IFVG Long", style = shape.triangleup,
+     location = location.belowbar, color = color.green, size = size.small, text = "IFVG", textcolor = color.white)
+plotshape(ifvg_detected and ifvg_direction == -1, title = "IFVG Short", style = shape.triangledown,
+     location = location.abovebar, color = color.red, size = size.small, text = "IFVG", textcolor = color.white)
+
+// SMT markers
+plotshape(bullish_smt, title = "SMT Bullish", style = shape.labelup,
+     location = location.belowbar, color = color.blue, size = size.tiny, text = "SMT+", textcolor = color.white)
+plotshape(bearish_smt, title = "SMT Bearish", style = shape.labeldown,
+     location = location.abovebar, color = color.purple, size = size.tiny, text = "SMT-", textcolor = color.white)
+
+// Volume spike
+plotshape(vol_spike, title = "Volume Spike", style = shape.circle,
+     location = location.bottom, color = color.orange, size = size.tiny)
+
+// Background for high-grade setups
+bgcolor(grade_score >= 5 ? color.new(color.green, 95) : grade_score >= 3 ? color.new(color.yellow, 95) : na,
+     title = "Setup Grade Background")
+
+
+// --- INPUTS ---
+length = input.int(5, minval = 1, title = 'Pivot Length')
+showLabels = input.bool(true, title = 'Show Labels')
+
+// Colors
+colBull2 = input.color(#089981, 'Bullish Color')
+colBear2 = input.color(#f23645, 'Bearish Color')
+
+// Alerts
+alertOnBOS = input.bool(true, 'Alert on BOS', group = 'Alerts')
+alertOnCHoCH = input.bool(true, 'Alert on CHoCH', group = 'Alerts')
+
+// --- LOGIC ---
+
+// Detect Pivot Highs and Lows
+ph = ta.pivothigh(high, length, length)
+pl = ta.pivotlow(low, length, length)
+
+// Variables
+var float swingHighPrice = na
+var int swingHighIndex = na
+var float swingLowPrice = na
+var int swingLowIndex = na
+
+// Trend State: 0 = Start, 1 = Bullish, -1 = Bearish
+var int trend = 0
+
+// Updating Swing Points
+if not na(ph)
+    swingHighPrice := high[length]
+    swingHighIndex := bar_index[length]
+    swingHighIndex
+
+if not na(pl)
+    swingLowPrice := low[length]
+    swingLowIndex := bar_index[length]
+    swingLowIndex
+
+// --- DRAWING FUNCTION ---
+drawLine(x1, y1, x2, y2, color, txt) =>
+    line.new(x1, y1, x2, y2, color = color, style = line.style_solid, width = 1)
+    if showLabels
+        int midpoint = int(math.avg(x1, x2))
+        // style_label_down means the anchor is at the bottom, so text sits ABOVE the line
+        label.new(midpoint, y1, text = txt, color = color.new(color.white, 100), style = label.style_label_down, textcolor = color, size = size.tiny)
+
+// --- EVENT FLAGS (reset every bar) ---
+bullBOS = false
+bearBOS = false
+bullCHoCH = false
+bearCHoCH = false
+
+// --- BREAKOUT LOGIC ---
+
+// Bullish Break (Price closes above Swing High)
+if not na(swingHighPrice) and close > swingHighPrice
+    if trend == -1
+        drawLine(swingHighIndex, swingHighPrice, bar_index, swingHighPrice, colBull2, 'CHoCH')
+        trend := 1
+        bullCHoCH := true
+        bullCHoCH
+    else
+        drawLine(swingHighIndex, swingHighPrice, bar_index, swingHighPrice, colBull2, 'BOS')
+        trend := 1
+        bullBOS := true
+        bullBOS
+    swingHighPrice := na
+    swingHighPrice
+
+// Bearish Break (Price closes below Swing Low)
+if not na(swingLowPrice) and close < swingLowPrice
+    if trend == 1
+        drawLine(swingLowIndex, swingLowPrice, bar_index, swingLowPrice, colBear2, 'CHoCH')
+        trend := -1
+        bearCHoCH := true
+        bearCHoCH
+    else
+        drawLine(swingLowIndex, swingLowPrice, bar_index, swingLowPrice, colBear2, 'BOS')
+        trend := -1
+        bearBOS := true
+        bearBOS
+    swingLowPrice := na
+    swingLowPrice
+
+// --- ALERTS ---
+bosEvent = bullBOS or bearBOS
+chochEvent = bullCHoCH or bearCHoCH
+
+// Dynamic alerts -> create with "Any alert() function call"
+if alertOnBOS and bullBOS
+    alert('Bullish BOS on ' + syminfo.ticker + ' (' + timeframe.period + ') @ ' + str.tostring(close, format.mintick), alert.freq_once_per_bar)
+if alertOnBOS and bearBOS
+    alert('Bearish BOS on ' + syminfo.ticker + ' (' + timeframe.period + ') @ ' + str.tostring(close, format.mintick), alert.freq_once_per_bar)
+if alertOnCHoCH and bullCHoCH
+    alert('Bullish CHoCH on ' + syminfo.ticker + ' (' + timeframe.period + ') @ ' + str.tostring(close, format.mintick), alert.freq_once_per_bar)
+if alertOnCHoCH and bearCHoCH
+    alert('Bearish CHoCH on ' + syminfo.ticker + ' (' + timeframe.period + ') @ ' + str.tostring(close, format.mintick), alert.freq_once_per_bar)
+
+// Static alert conditions -> selectable from the alert dropdown
+alertcondition(bosEvent, 'BOS', 'BOS detected on {{ticker}} ({{interval}}) @ {{close}}')
+alertcondition(chochEvent, 'CHoCH', 'CHoCH detected on {{ticker}} ({{interval}}) @ {{close}}')
+alertcondition(bosEvent or chochEvent, 'BOS or CHoCH', 'Structure break detected on {{ticker}} ({{interval}}) @ {{close}}')
+alertcondition(bullBOS, 'Bullish BOS', 'Bullish BOS on {{ticker}} ({{interval}}) @ {{close}}')
+alertcondition(bearBOS, 'Bearish BOS', 'Bearish BOS on {{ticker}} ({{interval}}) @ {{close}}')
+alertcondition(bullCHoCH, 'Bullish CHoCH', 'Bullish CHoCH on {{ticker}} ({{interval}}) @ {{close}}')
+alertcondition(bearCHoCH, 'Bearish CHoCH', 'Bearish CHoCH on {{ticker}} ({{interval}}) @ {{close}}')
+
+
+// Zone Detection Settings
+use_val = input.bool(true, "Filter by Overbought/Oversold",
+     tooltip="When enabled, only creates zones when RSI shows overbought/oversold conditions", group="Detection")
+state_thresh = input.int(5, "Filter Strength", minval=1, maxval=30,
+     tooltip="Sets the minimum deviation from neutral RSI (50) to consider market overbought/oversold", group="Detection")
+tolerance = input.float(0.05, "Equal Level Tolerance", minval=0.001, maxval=0.1, step=0.001,
+     tooltip="Controls how closely highs/lows need to match to create an equal level zone. A lower value will give less signals.", group="Detection")
+
+// Zone Management
+expiry_age = input.int(1000, "Max Zone Age", minval=1,
+     tooltip="Number of bars after which a zone will be automatically removed", group="Management")
+mitigate = input.string("body", "Sweep Type", options=["wick", "body"],
+     tooltip="Body: zone removed when price body (close) crosses it; Wick: zone removed when price wick crosses it", group="Management")
+allow_rejection = input.bool(false, "Allow Rejection",
+     tooltip="When enabled with body sweep type, requires two consecutive closes beyond zone to remove it", group="Management")
+
+// Appearance
+colBull = input.color(color.purple, "Bull Color", inline="msc",
+     tooltip="Color for bullish (support) zones", group="Appearance")
+colBear = input.color(color.purple, "Bear Color", inline="msc",
+     tooltip="Color for bearish (resistance) zones", group="Appearance")
+
+varian = math.avg(math.abs(high-high[1]), math.abs(low-low[1]))
+smoothvar = ta.ema(varian, 500)
+
+state = ta.rsi(close, 14)
+
+eqh = math.abs(high-high[1]) < smoothvar * tolerance
+eql = math.abs(low-low[1]) < smoothvar * tolerance
+
+rsi_filtered_eqh = use_val ? state > 50 + state_thresh : false
+rsi_filtered_eql = use_val ? state < 50 - state_thresh : false
+create_eqh = eqh and rsi_filtered_eqh and not eqh[1]
+create_eql = eql and rsi_filtered_eql and not eql[1]
+
+var eqlarray = array.new_line()
+var eqharray = array.new_line()
+var eqlarray1 = array.new_line()
+var eqharray1 = array.new_line()
+
+if create_eqh
+    eqharray.unshift(line.new(bar_index-1,math.max(high, high[1]),bar_index+1,math.max(high, high[1]), color = colBear, width = 1))
+    eqharray1.unshift(line.new(bar_index-1,math.max(open, open[1], close, close[1]),bar_index+1,math.max(open, open[1], close, close[1]), color = color.new(colBear, 80), width = 1))
+    linefill.new(eqharray.first(), eqharray1.first(), color.new(colBear, 80))
+if create_eql
+    eqlarray.unshift(line.new(bar_index-1,math.min(low, low[1]),bar_index+1,math.min(low, low[1]), color = colBull, width = 1))
+    eqlarray1.unshift(line.new(bar_index-1,math.min(open, open[1], close, close[1]),bar_index+1,math.min(open, open[1], close, close[1]), color = color.new(colBull, 80), width = 1))
+    linefill.new(eqlarray.first(), eqlarray1.first(), color.new(colBull, 80))
+
+plotchar(create_eqh ? 1 : na, "EQH", "▼", location.abovebar, size = size.tiny, color = colBear)
+plotchar(create_eql ? 1 : na, "EQL", "▲", location.belowbar, size = size.tiny, color = colBull)
+
+eqh_mitigated = false
+eql_mitigated = false
+
+// Process Equal High (EQH) zones
+if eqharray.size() > 0
+    for ln = eqharray.size() - 1 to 0
+        if ln < eqharray.size()
+            cL = eqharray.get(ln)
+            cL_ = eqharray1.get(ln)
+            yL = cL.get_y1()
+            x1 = cL.get_x1()
+            age = bar_index - x1
+            is_body = mitigate == "body"
+            cross_body = close > yL
+            cross_body_confirmed = close > yL and close[1] > yL
+            cross_wick = high > yL
+            remove_by_mitigation = is_body ? (allow_rejection ? cross_body_confirmed : cross_body) : cross_wick
+
+            if remove_by_mitigation or age > expiry_age
+                eqharray.remove(ln)
+                eqharray1.remove(ln)
+                eqh_mitigated := true
+            else
+                cL.set_x2(bar_index + 1)
+                cL_.set_x2(bar_index + 1)
+
+// Process Equal Low (EQL) zones
+if eqlarray.size() > 0
+    for ln = eqlarray.size() - 1 to 0
+        if ln < eqlarray.size()
+            cL = eqlarray.get(ln)
+            cL_ = eqlarray1.get(ln)
+            yL = cL.get_y1()
+            x1 = cL.get_x1()
+            age = bar_index - x1
+            is_body = mitigate == "body"
+            cross_body = close < yL
+            cross_body_confirmed = close < yL and close[1] < yL
+            cross_wick = low < yL
+            remove_by_mitigation = is_body ? (allow_rejection ? cross_body_confirmed : cross_body) : cross_wick
+
+            if remove_by_mitigation or age > expiry_age
+                eqlarray.remove(ln)
+                eqlarray1.remove(ln)
+                eql_mitigated := true
+            else
+                cL.set_x2(bar_index + 1)
+                cL_.set_x2(bar_index + 1)
+
+// Alerts
+eqh_formed = create_eqh
+eql_formed = create_eql
+
+// Define alert conditions
+alertcondition(eqh_formed, "New Equal High Formed", "A new Equal High (EQH) resistance zone has formed")
+alertcondition(eql_formed, "New Equal Low Formed", "A new Equal Low (EQL) support zone has formed")
+alertcondition(eqh_mitigated, "Equal High Mitigated", "Price has mitigated an Equal High (EQH) resistance zone")
+alertcondition(eql_mitigated, "Equal Low Mitigated", "Price has mitigated an Equal Low (EQL) support zone")
+
+
+
+// --- Constantes ---
+string TF_5M = "5"
+string TF_15M = "15"
+string TF_1H = "60"
+string TF_4H = "240"
+
+// --- Inputs ---
+string GROUP_DISPLAY = "Visualización"
+string GROUP_STYLE = "Estilo"
+
+bool show5MInput = input.bool(true, "Mostrar 5min", group = GROUP_DISPLAY, tooltip = "Muestra únicamente el FVG activo más cercano del timeframe de 5 minutos.")
+bool show15MInput = input.bool(true, "Mostrar 15min", group = GROUP_DISPLAY, tooltip = "Muestra únicamente el FVG activo más cercano del timeframe de 15 minutos.")
+bool show1HInput = input.bool(true, "Mostrar 1H", group = GROUP_DISPLAY, tooltip = "Muestra únicamente el FVG activo más cercano del timeframe de 1 hora.")
+bool show4HInput = input.bool(true, "Mostrar 4H", group = GROUP_DISPLAY, tooltip = "Muestra únicamente el FVG activo más cercano del timeframe de 4 horas.")
+
+color fvgColorInput = input.color(color.gray, "Color del FVG", group = GROUP_STYLE, tooltip = "Color de fondo de las zonas FVG.")
+int transparencyInput = input.int(82, "Transparencia", minval = 0, maxval = 100, group = GROUP_STYLE, tooltip = "Transparencia del fondo de las zonas FVG.")
+
+// --- Funciones ---
+// Conserva los FVG activos y selecciona el que está más cerca del cierre actual.
+f_getClosestFvg() =>
+    var array<float> topsArray = array.new_float()
+    var array<float> bottomsArray = array.new_float()
+    var array<int> directionsArray = array.new_int()
+    var array<int> startsArray = array.new_int()
+
+    bool bullishFvg = low[1] > high[3]
+    bool bearishFvg = high[1] < low[3]
+
+    if bullishFvg
+        array.push(topsArray, low[1])
+        array.push(bottomsArray, high[3])
+        array.push(directionsArray, 1)
+        array.push(startsArray, time[3])
+
+    if bearishFvg
+        array.push(topsArray, low[3])
+        array.push(bottomsArray, high[1])
+        array.push(directionsArray, -1)
+        array.push(startsArray, time[3])
+
+    int removeIndex = array.size(topsArray) - 1
+    while removeIndex >= 0
+        float zoneTop = array.get(topsArray, removeIndex)
+        float zoneBottom = array.get(bottomsArray, removeIndex)
+        int zoneDirection = array.get(directionsArray, removeIndex)
+        bool isFilled = zoneDirection == 1 ? low <= zoneBottom : high >= zoneTop
+
+        if isFilled
+            array.remove(topsArray, removeIndex)
+            array.remove(bottomsArray, removeIndex)
+            array.remove(directionsArray, removeIndex)
+            array.remove(startsArray, removeIndex)
+        removeIndex -= 1
+
+    float closestTop = na
+    float closestBottom = na
+    int closestStart = na
+    float closestDistance = na
+
+    int zoneCount = array.size(topsArray)
+    if zoneCount > 0
+        for zoneIndex = 0 to zoneCount - 1
+            float zoneTop = array.get(topsArray, zoneIndex)
+            float zoneBottom = array.get(bottomsArray, zoneIndex)
+            float zoneDistance = close > zoneTop ? close - zoneTop : close < zoneBottom ? zoneBottom - close : 0.0
+
+            if na(closestDistance) or zoneDistance < closestDistance
+                closestDistance := zoneDistance
+                closestTop := zoneTop
+                closestBottom := zoneBottom
+                closestStart := array.get(startsArray, zoneIndex)
+
+    [closestTop, closestBottom, closestStart]
+
+f_updateBox(box boxId, float zoneTop, float zoneBottom, int zoneStart, string zoneText, bool shouldShow, color zoneColor) =>
+    box resultBox = boxId
+
+    if not shouldShow or na(zoneTop) or na(zoneBottom) or na(zoneStart)
+        if not na(resultBox)
+            box.delete(resultBox)
+        resultBox := na
+    else if na(resultBox)
+        resultBox := box.new(
+             left = zoneStart,
+             top = zoneTop,
+             right = time,
+             bottom = zoneBottom,
+             xloc = xloc.bar_time,
+             bgcolor = zoneColor,
+             border_color = color.new(color.gray, 100),
+             border_width = 1,
+             text = zoneText,
+             text_color = chart.fg_color,
+             text_size = size.small,
+             text_halign = text.align_right,
+             text_valign = text.align_center,
+             text_wrap = text.wrap_none)
+    else
+        box.set_left(resultBox, zoneStart)
+        box.set_top(resultBox, zoneTop)
+        box.set_right(resultBox, time)
+        box.set_bottom(resultBox, zoneBottom)
+        box.set_bgcolor(resultBox, zoneColor)
+        box.set_border_color(resultBox, color.new(color.gray, 100))
+        box.set_text(resultBox, zoneText)
+        box.set_text_color(resultBox, chart.fg_color)
+        box.set_text_halign(resultBox, text.align_right)
+
+    resultBox
+
+// --- Datos MTF ---
+[fvg5MTop, fvg5MBottom, fvg5MStart] = request.security(syminfo.tickerid, TF_5M, f_getClosestFvg(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+[fvg15MTop, fvg15MBottom, fvg15MStart] = request.security(syminfo.tickerid, TF_15M, f_getClosestFvg(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+[fvg1HTop, fvg1HBottom, fvg1HStart] = request.security(syminfo.tickerid, TF_1H, f_getClosestFvg(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+[fvg4HTop, fvg4HBottom, fvg4HStart] = request.security(syminfo.tickerid, TF_4H, f_getClosestFvg(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+
+// --- Visualización ---
+var box fvg5MBox = na
+var box fvg15MBox = na
+var box fvg1HBox = na
+var box fvg4HBox = na
+
+float chartTimeframeSeconds = timeframe.in_seconds()
+float tf5MSeconds = timeframe.in_seconds(TF_5M)
+float tf15MSeconds = timeframe.in_seconds(TF_15M)
+float tf1HSeconds = timeframe.in_seconds(TF_1H)
+float tf4HSeconds = timeframe.in_seconds(TF_4H)
+
+bool is5MHigher = not na(chartTimeframeSeconds) and tf5MSeconds > chartTimeframeSeconds
+bool is15MHigher = not na(chartTimeframeSeconds) and tf15MSeconds > chartTimeframeSeconds
+bool is1HHigher = not na(chartTimeframeSeconds) and tf1HSeconds > chartTimeframeSeconds
+bool is4HHigher = not na(chartTimeframeSeconds) and tf4HSeconds > chartTimeframeSeconds
+
+color zoneColor = color.new(fvgColorInput, transparencyInput)
+
+if barstate.islast
+    fvg5MBox := f_updateBox(fvg5MBox, fvg5MTop, fvg5MBottom, fvg5MStart, "5min FVG", show5MInput and is5MHigher, zoneColor)
+    fvg15MBox := f_updateBox(fvg15MBox, fvg15MTop, fvg15MBottom, fvg15MStart, "15min FVG", show15MInput and is15MHigher, zoneColor)
+    fvg1HBox := f_updateBox(fvg1HBox, fvg1HTop, fvg1HBottom, fvg1HStart, "1H FVG", show1HInput and is1HHigher, zoneColor)
+    fvg4HBox := f_updateBox(fvg4HBox, fvg4HTop, fvg4HBottom, fvg4HStart, "4H FVG", show4HInput and is4HHigher, zoneColor)
+
+// ============================================================================
+// 12) [NUEVO] PD ARRAY DELIVERY MODEL — Touch de FVG HTF + IFVG en TF actual
+// ============================================================================
+// Lógica del modelo (independiente del modelo original de sweep, no lo altera):
+//   a) "Touch": el precio (mecha) toca cualquiera de las FVG HTF ya calculadas
+//      arriba (5m / 15m / 1H / 4H — siempre la más cercana al precio en cada
+//      timeframe, ver sección "Datos MTF").
+//   b) A partir de ese touch hay "pda_max_wait" velas (por defecto 7) para que
+//      se forme una IFVG en el TIMEFRAME ACTUAL del gráfico. Se reutiliza la
+//      detección de inversión ya existente en la Sección 7 (marcada de forma
+//      genérica en fvgArr vía f.invertedBar / f.invertedDir).
+//   c) Si la IFVG aparece dentro de la ventana → señal BUY (IFVG bajista
+//      invertida al alza) o SELL (IFVG alcista invertida a la baja).
+//      SL = mecha del swing/pivot más cercano ya calculado en la sección
+//      BOS/CHoCH (swingLowPrice para BUY, swingHighPrice para SELL).
+//      TP = Entry ± Risk * pda_rr  (por defecto 1:2).
+//   d) Sólo se mantienen en el gráfico las últimas "pda_max_signals" señales;
+//      las más antiguas se borran automáticamente.
+// ============================================================================
+
+// --- a) Touch de cualquier PD Array HTF (usa las zonas ya calculadas arriba) ---
+pda_touch5m  = enable_pda and pda_use_5m  and not na(fvg5MTop)  and not na(fvg5MBottom)  and high >= fvg5MBottom  and low <= fvg5MTop
+pda_touch15m = enable_pda and pda_use_15m and not na(fvg15MTop) and not na(fvg15MBottom) and high >= fvg15MBottom and low <= fvg15MTop
+pda_touch1h  = enable_pda and pda_use_1h  and not na(fvg1HTop)  and not na(fvg1HBottom)  and high >= fvg1HBottom  and low <= fvg1HTop
+pda_touch4h  = enable_pda and pda_use_4h  and not na(fvg4HTop)  and not na(fvg4HBottom)  and high >= fvg4HBottom  and low <= fvg4HTop
+
+pda_touched = pda_touch5m or pda_touch15m or pda_touch1h or pda_touch4h
+
+if pda_touched
+    pda_touch_bar := bar_index
+    if pda_show_zone_marker
+        label.new(x = bar_index, y = low, text = "PDA", style = label.style_label_up, color = color.new(color.gray, 100), textcolor = color.gray, size = size.tiny)
+
+// Expira la espera si no llega ninguna IFVG a tiempo
+if not na(pda_touch_bar) and (bar_index - pda_touch_bar) > pda_max_wait
+    pda_touch_bar := na
+
+// --- b) IFVG genérica del timeframe actual (marcada de forma additiva en la Sección 7) ---
+pda_ifvg_now = false
+pda_ifvg_dir = 0
+if fvgArr.size() > 0
+    for i = 0 to fvgArr.size() - 1
+        fchk = fvgArr.get(i)
+        if fchk.invertedBar == bar_index
+            pda_ifvg_now := true
+            pda_ifvg_dir := fchk.invertedDir
+
+// --- c) Confirmación dentro de la ventana de espera ---
+pda_valid_window = not na(pda_touch_bar) and (bar_index - pda_touch_bar) <= pda_max_wait
+pda_fire         = enable_pda and pda_ifvg_now and pda_valid_window
+
+if pda_fire
+    pda_dir = pda_ifvg_dir
+    entryPx = close
+
+    slPx = pda_dir == 1 ?
+         (na(swingLowPrice)  ? low  : swingLowPrice) :
+         (na(swingHighPrice) ? high : swingHighPrice)
+
+    riskPts = math.abs(entryPx - slPx)
+
+    if riskPts > 0
+        tpPx = pda_dir == 1 ? entryPx + riskPts * pda_rr : entryPx - riskPts * pda_rr
+
+        sig = pdaSignalT.new()
+        sig.lb := label.new(x = bar_index, y = pda_dir == 1 ? low : high,
+             text = pda_dir == 1 ? " BUY\nPD Array IFVG" : " SELL\nPD Array IFVG",
+             style = pda_dir == 1 ? label.style_label_up : label.style_label_down,
+             color = pda_dir == 1 ? pda_buy_color : pda_sell_color,
+             textcolor = color.white, size = size.small)
+
+        sig.enLn := line.new(x1 = bar_index, y1 = entryPx, x2 = bar_index + sltp_ext_bars, y2 = entryPx, color = color.new(color.white, 40), style = line.style_dotted, width = 1)
+        sig.slLn := line.new(x1 = bar_index, y1 = slPx, x2 = bar_index + sltp_ext_bars, y2 = slPx, color = color.red, style = line.style_dashed, width = 1)
+        sig.tpLn := line.new(x1 = bar_index, y1 = tpPx, x2 = bar_index + sltp_ext_bars, y2 = tpPx, color = color.green, style = line.style_dashed, width = 1)
+
+        pdaSignals.push(sig)
+
+        if alert_pda
+            alert((pda_dir == 1 ? "🟢 BUY" : "🔴 SELL") + " PD Array Delivery IFVG (" + syminfo.ticker + " " + timeframe.period + ")", alert.freq_once_per_bar_close)
+
+        // --- d) Conserva sólo las últimas "pda_max_signals" señales ---
+        if pdaSignals.size() > pda_max_signals
+            old = pdaSignals.shift()
+            if not na(old.lb)
+                old.lb.delete()
+            if not na(old.slLn)
+                old.slLn.delete()
+            if not na(old.tpLn)
+                old.tpLn.delete()
+            if not na(old.enLn)
+                old.enLn.delete()
+
+    // La ventana se consume tras el intento (evita disparar varias veces el mismo touch)
+    pda_touch_bar := na
+
+alertcondition(enable_pda and pda_fire and pda_ifvg_dir == 1, "PDA Buy", "PD Array Delivery BUY IFVG on {{ticker}} ({{interval}}) @ {{close}}")
+alertcondition(enable_pda and pda_fire and pda_ifvg_dir == -1, "PDA Sell", "PD Array Delivery SELL IFVG on {{ticker}} ({{interval}}) @ {{close}}")
+
+// === CPI News Buy Stop and Sell Stop
+
+// === Master Switch ===
+enabled = input.bool(false, "CPI News Buy Stop and Sell Stop")
+
+// === Inputs ===
+distance_type = input.string("Points", "Pad/TP/SL in", options=["Points", "Ticks"])
+pt_factor = distance_type == "Points" ? 1 : syminfo.mintick
+
+pad_points = input.int(30, "Pad Protection", minval=1)
+tp_points  = input.int(50, "Take Profit", minval=1)
+sl_points  = input.int(30, "Stop Loss", minval=1)
+
+pad_dist = pad_points * pt_factor
+tp_dist  = tp_points  * pt_factor
+sl_dist  = sl_points  * pt_factor
+
+// Colors
+buy_color  = input.color(color.green, "Buy Pad Line Color")
+sell_color = input.color(color.red,   "Sell Pad Line Color")
+mid_color  = input.color(color.blue,  "Current Price Line Color")
+
+// Styles
+line_style_inp = input.string("Dotted", "Line Style", options=["Solid", "Dotted", "Dashed"])
+line_width     = input.int(2, "Line Width", minval=1, maxval=5)
+mid_line_width = input.int(3, "Current Price Line Width", minval=1, maxval=5)
+
+line_style = line_style_inp == "Dashed" ? line.style_dashed : line_style_inp == "Dotted" ? line.style_dotted : line.style_solid
+
+// Label options
+label_size_str = input.string("tiny", "Label Font Size", options=["tiny", "small", "normal", "large", "huge"])
+label_size = label_size_str == "tiny"   ? size.tiny   :
+             label_size_str == "small"  ? size.small  :
+             label_size_str == "normal" ? size.normal :
+             label_size_str == "large"  ? size.large  :
+             label_size_str == "huge"   ? size.huge   : size.normal
+
+show_labels      = input.bool(true, "Show Labels")
+label_bg_visible = input.bool(true, "Background Fill for Labels? (off = only text)")
+
+// Per-label Transparency
+buy_tp_label_transp   = input.int(0, "Buy TP Label Transparency", minval=0, maxval=100)
+buy_sl_label_transp   = input.int(0, "Buy SL Label Transparency", minval=0, maxval=100)
+buy_pad_label_transp  = input.int(0, "Buy Pad Label Transparency", minval=0, maxval=100)
+sell_tp_label_transp  = input.int(0, "Sell TP Label Transparency", minval=0, maxval=100)
+sell_sl_label_transp  = input.int(0, "Sell SL Label Transparency", minval=0, maxval=100)
+sell_pad_label_transp = input.int(0, "Sell Pad Label Transparency", minval=0, maxval=100)
+price_label_transp    = input.int(0, "Current Price Label Transparency", minval=0, maxval=100)
+
+// Utility functions for labels
+get_label_bg_color(col, transp) =>
+    label_bg_visible ? color.new(col, transp) : color.new(color.white, 100)
+get_label_text_color(col) =>
+    label_bg_visible ? color.white : col
+
+// === Calculate Levels ===
+current_price = close
+buy_pad_level  = current_price + pad_dist
+sell_pad_level = current_price - pad_dist
+buy_tp_level   = buy_pad_level + tp_dist
+buy_sl_level   = buy_pad_level - sl_dist
+sell_tp_level  = sell_pad_level - tp_dist
+sell_sl_level  = sell_pad_level + sl_dist
+
+// === Efficient Line Pattern ===
+// Only one line per level, updated every bar
+var line buy_pad_line  = na
+var line buy_tp_line   = na
+var line buy_sl_line   = na
+var line sell_pad_line = na
+var line sell_tp_line  = na
+var line sell_sl_line  = na
+var line price_line    = na
+
+// === Labels: Delete-then-recreate (for offset update)
+var label buy_pad_label = na
+var label buy_tp_label  = na
+var label buy_sl_label  = na
+var label sell_pad_label = na
+var label sell_tp_label  = na
+var label sell_sl_label  = na
+var label price_label = na
+
+offset = syminfo.mintick * 10
+
+if enabled
+    if na(buy_pad_line)
+        buy_pad_line  := line.new(bar_index, buy_pad_level,  bar_index+1, buy_pad_level,  xloc.bar_index, extend.right, buy_color, line_style, line_width)
+    else
+        line.set_xy1(buy_pad_line,  bar_index,   buy_pad_level)
+        line.set_xy2(buy_pad_line,  bar_index+1, buy_pad_level)
+
+    if na(buy_tp_line)
+        buy_tp_line := line.new(bar_index, buy_tp_level,  bar_index+1, buy_tp_level,  xloc.bar_index, extend.right, buy_color, line_style, line_width)
+    else
+        line.set_xy1(buy_tp_line,   bar_index,   buy_tp_level)
+        line.set_xy2(buy_tp_line,   bar_index+1, buy_tp_level)
+
+    if na(buy_sl_line)
+        buy_sl_line := line.new(bar_index, buy_sl_level,  bar_index+1, buy_sl_level,  xloc.bar_index, extend.right, buy_color, line_style, line_width)
+    else
+        line.set_xy1(buy_sl_line,   bar_index,   buy_sl_level)
+        line.set_xy2(buy_sl_line,   bar_index+1, buy_sl_level)
+
+    if na(sell_pad_line)
+        sell_pad_line := line.new(bar_index, sell_pad_level, bar_index+1, sell_pad_level, xloc.bar_index, extend.right, sell_color, line_style, line_width)
+    else
+        line.set_xy1(sell_pad_line,  bar_index,   sell_pad_level)
+        line.set_xy2(sell_pad_line,  bar_index+1, sell_pad_level)
+
+    if na(sell_tp_line)
+        sell_tp_line := line.new(bar_index, sell_tp_level,  bar_index+1, sell_tp_level,  xloc.bar_index, extend.right, sell_color, line_style, line_width)
+    else
+        line.set_xy1(sell_tp_line,   bar_index,   sell_tp_level)
+        line.set_xy2(sell_tp_line,   bar_index+1, sell_tp_level)
+
+    if na(sell_sl_line)
+        sell_sl_line := line.new(bar_index, sell_sl_level,  bar_index+1, sell_sl_level,  xloc.bar_index, extend.right, sell_color, line_style, line_width)
+    else
+        line.set_xy1(sell_sl_line,   bar_index,   sell_sl_level)
+        line.set_xy2(sell_sl_line,   bar_index+1, sell_sl_level)
+
+    if na(price_line)
+        price_line := line.new(bar_index, current_price, bar_index+1, current_price, xloc.bar_index, extend.right, mid_color, line.style_solid, mid_line_width)
+    else
+        line.set_xy1(price_line, bar_index, current_price)
+        line.set_xy2(price_line, bar_index+1, current_price)
+
+    label.delete(buy_pad_label)
+    label.delete(buy_tp_label)
+    label.delete(buy_sl_label)
+    label.delete(sell_pad_label)
+    label.delete(sell_tp_label)
+    label.delete(sell_sl_label)
+    label.delete(price_label)
+
+    // === Draw Labels (if enabled)
+    if show_labels
+        buy_pad_label := label.new(x=bar_index, y=buy_pad_level + offset, text="Buy Stop", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=get_label_bg_color(buy_color, buy_pad_label_transp), textcolor=get_label_text_color(buy_color),size=label_size)
+
+        buy_tp_label := label.new(x=bar_index, y=buy_tp_level + offset, text="Sell Limit", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=get_label_bg_color(buy_color, buy_tp_label_transp), textcolor=get_label_text_color(buy_color), size=label_size)
+
+        buy_sl_label := label.new(x=bar_index, y=buy_sl_level + offset,text=".",xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=get_label_bg_color(buy_color, buy_sl_label_transp), textcolor=get_label_text_color(buy_color), size=label_size)
+
+        sell_pad_label := label.new(x=bar_index,y=sell_pad_level + offset,text="Sell Stop",xloc=xloc.bar_index,yloc=yloc.price,style=label.style_label_up,color=get_label_bg_color(sell_color, sell_pad_label_transp),textcolor=get_label_text_color(sell_color),size=label_size)
+
+        sell_tp_label := label.new(x=bar_index,y=sell_tp_level + offset,text="Buy Limit",xloc=xloc.bar_index,yloc=yloc.price,style=label.style_label_up,color=get_label_bg_color(sell_color, sell_tp_label_transp),textcolor=get_label_text_color(sell_color),size=label_size)
+
+        sell_sl_label := label.new(x=bar_index,y=sell_sl_level + offset,text=".",xloc=xloc.bar_index,yloc=yloc.price,style=label.style_label_up,color=get_label_bg_color(sell_color, sell_sl_label_transp),textcolor=get_label_text_color(sell_color),size=label_size)
+
+        price_label := label.new(x=bar_index,y=current_price + offset,text=".",xloc=xloc.bar_index,yloc=yloc.price,style=label.style_label_up,color=get_label_bg_color(color.blue, price_label_transp),textcolor=get_label_text_color(color.blue),size=label_size)
+else
+    // Apagado: borra todo lo que quede dibujado
+    line.delete(buy_pad_line)
+    line.delete(buy_tp_line)
+    line.delete(buy_sl_line)
+    line.delete(sell_pad_line)
+    line.delete(sell_tp_line)
+    line.delete(sell_sl_line)
+    line.delete(price_line)
+    label.delete(buy_pad_label)
+    label.delete(buy_tp_label)
+    label.delete(buy_sl_label)
+    label.delete(sell_pad_label)
+    label.delete(sell_tp_label)
+    label.delete(sell_sl_label)
+    label.delete(price_label)
+
+    buy_pad_line  := na
+    buy_tp_line   := na
+    buy_sl_line   := na
+    sell_pad_line := na
+    sell_tp_line  := na
+    sell_sl_line  := na
+    price_line    := na
