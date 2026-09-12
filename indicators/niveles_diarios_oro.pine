@@ -69,10 +69,10 @@ wasInFutDay := inFutDay
 
 // ============================= APERTURAS Y MÁX/MÍN ANTERIOR =============================
 grpDW = "Día / Semana anterior"
-showDOpen  = input.bool(true, "Apertura diaria", group=grpDW)
-showWOpen  = input.bool(true, "Apertura semanal", group=grpDW)
+showDOpen  = input.bool(false, "Apertura diaria", group=grpDW)
+showWOpen  = input.bool(false, "Apertura semanal", group=grpDW)
 showPDHL   = input.bool(true, "Máx/Mín día anterior (Res./Sop. mayor)", group=grpDW)
-showPWHL   = input.bool(true, "Máx/Mín semana anterior", group=grpDW)
+showPWHL   = input.bool(false, "Máx/Mín semana anterior", group=grpDW)
 dOpenColor = input.color(color.new(color.gray, 0), "Color apertura diaria", group=grpDW)
 wOpenColor = input.color(color.new(color.purple, 0), "Color apertura semanal", group=grpDW)
 pdhColor   = input.color(color.new(color.red, 0), "Color Máx día anterior", group=grpDW)
@@ -151,9 +151,9 @@ if not na(pdhLine)
 // que el precio hace nuevos extremos, hasta que cierra el día y arranca de nuevo.
 grpDayLive     = "Día en curso (DAY)"
 showDayHL      = input.bool(true, "Mostrar Máx/Mín del día en curso (DAY)", group=grpDayLive)
-dayHLColor     = input.color(color.new(color.purple, 0), "Color DAY", group=grpDayLive)
-dayHLWidth     = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpDayLive)
-dayHLStyleIn   = input.string("Punteada", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpDayLive)
+dayHLColor     = input.color(color.new(color.yellow, 0), "Color DAY", group=grpDayLive)
+dayHLWidth     = input.int(2, "Grosor de línea", minval=1, maxval=4, group=grpDayLive)
+dayHLStyleIn   = input.string("Sólida", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpDayLive)
 showDayHLLabels = input.bool(true, "Mostrar etiquetas", group=grpDayLive)
 dayHLLineStyle = lineStyleFromInput(dayHLStyleIn)
 
@@ -254,7 +254,7 @@ if not na(pwhLine)
 
 // ============================= SESIÓN DE ASIA (TOKIO) =============================
 grpAsia = "Sesión de Asia"
-showAsiaHl   = input.bool(true, "Mostrar Alto/Bajo de la sesión de Asia anterior", group=grpAsia)
+showAsiaHl   = input.bool(false, "Mostrar Alto/Bajo de la sesión de Asia anterior", group=grpAsia)
 asiaSession  = input.session("0000-0900", "Horario sesión Asia (HHMM-HHMM)", group=grpAsia, tooltip="Por defecto: 00:00-09:00 hora de Tokio (aprox. sesión asiática/Tokio).")
 asiaTimezone = "Asia/Tokyo"
 asiaHighColor= input.color(color.new(color.orange, 0), "Color alto sesión Asia", group=grpAsia)
@@ -328,8 +328,8 @@ if showAsiaHl and not na(asiaHLine)
 
 // ============================= SESIÓN DE LONDRES ("nivel de Londres") =============================
 grpLdn = "Sesión de Londres"
-showLdnHl    = input.bool(true, "Mostrar Alto/Bajo de la sesión de Londres anterior", group=grpLdn)
-showLdnOpen  = input.bool(true, "Mostrar apertura de Londres", group=grpLdn)
+showLdnHl    = input.bool(false, "Mostrar Alto/Bajo de la sesión de Londres anterior", group=grpLdn)
+showLdnOpen  = input.bool(false, "Mostrar apertura de Londres", group=grpLdn)
 ldnSession   = input.session("0800-1630", "Horario sesión Londres (HHMM-HHMM)", group=grpLdn, tooltip="Por defecto: horario regular del London Stock Exchange (08:00-16:30 hora de Londres).")
 ldnTimezone  = "Europe/London"
 ldnHighColor = input.color(color.new(color.purple, 0), "Color alto sesión Londres", group=grpLdn)
@@ -422,11 +422,11 @@ if showLdnHl and not na(ldnHLine)
 
 // ============================= APERTURA NUEVA YORK Y MEDIANOCHE (ICT) =============================
 grpNY = "Nueva York"
-showNYOpen  = input.bool(true, "Mostrar apertura de Nueva York (sesión regular)", group=grpNY)
+showNYOpen  = input.bool(false, "Mostrar apertura de Nueva York (sesión regular)", group=grpNY)
 nySession   = input.session("0930-1600", "Horario sesión NY (HHMM-HHMM)", group=grpNY, tooltip="Por defecto: horario regular del mercado de EE.UU. (09:30-16:00 hora de Nueva York).")
 nyTimezone  = "America/New_York"
 nyOpenColor = input.color(color.new(color.lime, 0), "Color apertura NY", group=grpNY)
-showMidnight    = input.bool(true, "Mostrar apertura medianoche NY (00:00, estilo ICT)", group=grpNY)
+showMidnight    = input.bool(false, "Mostrar apertura medianoche NY (00:00, estilo ICT)", group=grpNY)
 midnightColor   = input.color(color.new(color.yellow, 0), "Color apertura medianoche", group=grpNY)
 nyWidth     = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpNY)
 nyStyleIn   = input.string("Punteada", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpNY)
@@ -508,7 +508,8 @@ if showMidnight and not na(midnightLine)
 grpPiv = "Pivotes"
 showPivots  = input.bool(true, "Mostrar pivotes clásicos", group=grpPiv)
 pivotTfIn   = input.string("Diario", "Timeframe de los pivotes", options=["Diario", "Semanal", "Mensual"], group=grpPiv)
-showR3S3    = input.bool(true, "Mostrar R3/S3", group=grpPiv)
+showR2S2    = input.bool(false, "Mostrar R2/S2", group=grpPiv)
+showR3S3    = input.bool(false, "Mostrar R3/S3", group=grpPiv)
 ppColor = input.color(color.new(color.gray, 0), "Color PP (pivote central)", group=grpPiv)
 rColor  = input.color(color.new(color.red, 0), "Color resistencias (R1-R3)", group=grpPiv)
 sColor  = input.color(color.new(color.green, 0), "Color soportes (S1-S3)", group=grpPiv)
@@ -578,9 +579,10 @@ if showPivots and newPivotBar and not na(pp)
 
     ppLine := line.new(bar_index, pp, bar_index, pp, color=ppColor, width=pivWidth, style=pivLineStyle)
     r1Line := line.new(bar_index, r1, bar_index, r1, color=color.new(rColor, 40), width=pivWidth, style=pivLineStyle)
-    r2Line := line.new(bar_index, r2, bar_index, r2, color=color.new(rColor, 20), width=pivWidth, style=pivLineStyle)
     s1Line := line.new(bar_index, s1, bar_index, s1, color=color.new(sColor, 40), width=pivWidth, style=pivLineStyle)
-    s2Line := line.new(bar_index, s2, bar_index, s2, color=color.new(sColor, 20), width=pivWidth, style=pivLineStyle)
+    if showR2S2
+        r2Line := line.new(bar_index, r2, bar_index, r2, color=color.new(rColor, 20), width=pivWidth, style=pivLineStyle)
+        s2Line := line.new(bar_index, s2, bar_index, s2, color=color.new(sColor, 20), width=pivWidth, style=pivLineStyle)
     if showR3S3
         r3Line := line.new(bar_index, r3, bar_index, r3, color=color.new(rColor, 0), width=pivWidth, style=pivLineStyle)
         s3Line := line.new(bar_index, s3, bar_index, s3, color=color.new(sColor, 0), width=pivWidth, style=pivLineStyle)
@@ -588,9 +590,10 @@ if showPivots and newPivotBar and not na(pp)
     if showPivLabels
         ppLbl := label.new(bar_index, pp, "PIVOT CENTRAL", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ppColor, size=size.tiny)
         r1Lbl := label.new(bar_index, r1, "RESISTENCIA", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
-        r2Lbl := label.new(bar_index, r2, "RESISTENCIA 2", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
         s1Lbl := label.new(bar_index, s1, "SOPORTE", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
-        s2Lbl := label.new(bar_index, s2, "SOPORTE 2", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
+        if showR2S2
+            r2Lbl := label.new(bar_index, r2, "RESISTENCIA 2", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
+            s2Lbl := label.new(bar_index, s2, "SOPORTE 2", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
         if showR3S3
             r3Lbl := label.new(bar_index, r3, "RESISTENCIA 3", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
             s3Lbl := label.new(bar_index, s3, "SOPORTE 3", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
@@ -598,15 +601,17 @@ if showPivots and newPivotBar and not na(pp)
 if showPivots and not na(ppLine)
     line.set_x2(ppLine, bar_index)
     line.set_x2(r1Line, bar_index)
-    line.set_x2(r2Line, bar_index)
     line.set_x2(s1Line, bar_index)
-    line.set_x2(s2Line, bar_index)
     if not na(ppLbl)
         label.set_x(ppLbl, bar_index)
         label.set_x(r1Lbl, bar_index)
-        label.set_x(r2Lbl, bar_index)
         label.set_x(s1Lbl, bar_index)
-        label.set_x(s2Lbl, bar_index)
+    if showR2S2 and not na(r2Line)
+        line.set_x2(r2Line, bar_index)
+        line.set_x2(s2Line, bar_index)
+        if not na(r2Lbl)
+            label.set_x(r2Lbl, bar_index)
+            label.set_x(s2Lbl, bar_index)
     if showR3S3 and not na(r3Line)
         line.set_x2(r3Line, bar_index)
         line.set_x2(s3Line, bar_index)
@@ -621,11 +626,11 @@ if showPivots and not na(ppLine)
 // Reutiliza grosor, estilo, etiquetas y colores de R/S del bloque de Pivotes de arriba;
 // cada sesión solo define su propio color de PP para poder distinguirlas entre sí.
 grpSessPiv = "Pivotes de sesión (Asia/Londres/NY)"
-showAsiaPivot = input.bool(true, "Mostrar pivote de sesión Asia", group=grpSessPiv)
+showAsiaPivot = input.bool(false, "Mostrar pivote de sesión Asia", group=grpSessPiv)
 asiaPivColor  = input.color(color.new(color.orange, 0), "Color PP Asia", group=grpSessPiv)
 showLdnPivot  = input.bool(true, "Mostrar pivote de sesión Londres", group=grpSessPiv)
 ldnPivColor   = input.color(color.new(color.fuchsia, 0), "Color PP Londres", group=grpSessPiv)
-showNYPivot   = input.bool(true, "Mostrar pivote de sesión Nueva York", group=grpSessPiv)
+showNYPivot   = input.bool(false, "Mostrar pivote de sesión Nueva York", group=grpSessPiv)
 nyPivColor    = input.color(color.new(color.lime, 0), "Color PP Nueva York", group=grpSessPiv)
 
 type PivSet
@@ -644,7 +649,7 @@ type PivSet
     label s2Lbl
     label s3Lbl
 
-f_drawPivotSet(ps, h, l, c, trigger, tag, ppCol, rCol, sCol, w, styleIn, showLbl, showR3S3In) =>
+f_drawPivotSet(ps, h, l, c, trigger, tag, ppCol, rCol, sCol, w, styleIn, showLbl, showR2S2In, showR3S3In) =>
     if trigger and not na(h) and not na(l) and not na(c)
         sPP = (h + l + c) / 3
         sR1 = 2 * sPP - l
@@ -671,9 +676,10 @@ f_drawPivotSet(ps, h, l, c, trigger, tag, ppCol, rCol, sCol, w, styleIn, showLbl
 
         ps.ppLine := line.new(bar_index, sPP, bar_index, sPP, color=ppCol, width=w, style=styleIn)
         ps.r1Line := line.new(bar_index, sR1, bar_index, sR1, color=color.new(rCol, 40), width=w, style=styleIn)
-        ps.r2Line := line.new(bar_index, sR2, bar_index, sR2, color=color.new(rCol, 20), width=w, style=styleIn)
         ps.s1Line := line.new(bar_index, sS1, bar_index, sS1, color=color.new(sCol, 40), width=w, style=styleIn)
-        ps.s2Line := line.new(bar_index, sS2, bar_index, sS2, color=color.new(sCol, 20), width=w, style=styleIn)
+        if showR2S2In
+            ps.r2Line := line.new(bar_index, sR2, bar_index, sR2, color=color.new(rCol, 20), width=w, style=styleIn)
+            ps.s2Line := line.new(bar_index, sS2, bar_index, sS2, color=color.new(sCol, 20), width=w, style=styleIn)
         if showR3S3In
             ps.r3Line := line.new(bar_index, sR3, bar_index, sR3, color=color.new(rCol, 0), width=w, style=styleIn)
             ps.s3Line := line.new(bar_index, sS3, bar_index, sS3, color=color.new(sCol, 0), width=w, style=styleIn)
@@ -681,9 +687,10 @@ f_drawPivotSet(ps, h, l, c, trigger, tag, ppCol, rCol, sCol, w, styleIn, showLbl
         if showLbl
             ps.ppLbl := label.new(bar_index, sPP, "PIVOT " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=ppCol, size=size.tiny)
             ps.r1Lbl := label.new(bar_index, sR1, "RESISTENCIA " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
-            ps.r2Lbl := label.new(bar_index, sR2, "RESISTENCIA 2 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
             ps.s1Lbl := label.new(bar_index, sS1, "SOPORTE " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
-            ps.s2Lbl := label.new(bar_index, sS2, "SOPORTE 2 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
+            if showR2S2In
+                ps.r2Lbl := label.new(bar_index, sR2, "RESISTENCIA 2 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
+                ps.s2Lbl := label.new(bar_index, sS2, "SOPORTE 2 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
             if showR3S3In
                 ps.r3Lbl := label.new(bar_index, sR3, "RESISTENCIA 3 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
                 ps.s3Lbl := label.new(bar_index, sS3, "SOPORTE 3 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
@@ -691,15 +698,17 @@ f_drawPivotSet(ps, h, l, c, trigger, tag, ppCol, rCol, sCol, w, styleIn, showLbl
     if not na(ps.ppLine)
         line.set_x2(ps.ppLine, bar_index)
         line.set_x2(ps.r1Line, bar_index)
-        line.set_x2(ps.r2Line, bar_index)
         line.set_x2(ps.s1Line, bar_index)
-        line.set_x2(ps.s2Line, bar_index)
         if not na(ps.ppLbl)
             label.set_x(ps.ppLbl, bar_index)
             label.set_x(ps.r1Lbl, bar_index)
-            label.set_x(ps.r2Lbl, bar_index)
             label.set_x(ps.s1Lbl, bar_index)
-            label.set_x(ps.s2Lbl, bar_index)
+        if showR2S2In and not na(ps.r2Line)
+            line.set_x2(ps.r2Line, bar_index)
+            line.set_x2(ps.s2Line, bar_index)
+            if not na(ps.r2Lbl)
+                label.set_x(ps.r2Lbl, bar_index)
+                label.set_x(ps.s2Lbl, bar_index)
         if showR3S3In and not na(ps.r3Line)
             line.set_x2(ps.r3Line, bar_index)
             line.set_x2(ps.s3Line, bar_index)
@@ -713,11 +722,11 @@ var PivSet ldnPivSet  = PivSet.new()
 var PivSet nyPivSet   = PivSet.new()
 
 if showAsiaPivot
-    asiaPivSet := f_drawPivotSet(asiaPivSet, prevAsiaHigh, prevAsiaLow, prevAsiaClose, asiaEnd, "ASIA", asiaPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
+    asiaPivSet := f_drawPivotSet(asiaPivSet, prevAsiaHigh, prevAsiaLow, prevAsiaClose, asiaEnd, "ASIA", asiaPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR2S2, showR3S3)
 if showLdnPivot
-    ldnPivSet := f_drawPivotSet(ldnPivSet, prevLdnHigh, prevLdnLow, prevLdnClose, ldnEnd, "LONDRES", ldnPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
+    ldnPivSet := f_drawPivotSet(ldnPivSet, prevLdnHigh, prevLdnLow, prevLdnClose, ldnEnd, "LONDRES", ldnPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR2S2, showR3S3)
 if showNYPivot
-    nyPivSet := f_drawPivotSet(nyPivSet, prevNYHigh, prevNYLow, prevNYClose, nyEnd, "NY", nyPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
+    nyPivSet := f_drawPivotSet(nyPivSet, prevNYHigh, prevNYLow, prevNYClose, nyEnd, "NY", nyPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR2S2, showR3S3)
 
 // ============================= ALERTAS =============================
 grpAlert = "Alertas"
