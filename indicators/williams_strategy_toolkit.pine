@@ -8,7 +8,8 @@ wr_os             = input.int(-80, title="%R Sobreventa", group="Williams %R")
 
 vix_len           = input.int(22, title="VIX Fix Periodo Lookback", group="Williams VIX Fix")
 vix_bblen         = input.int(20, title="Bandas VIX Periodo", group="Williams VIX Fix")
-vix_mult          = input.float(2.0, title="Bandas VIX Desviación", group="Williams VIX Fix")
+vix_mult_aviso    = input.float(2.0, title="Umbral Aviso (Desviaciones)", group="Williams VIX Fix")
+vix_mult_anomalia = input.float(2.5, title="Umbral Anomalía (Desviaciones)", group="Williams VIX Fix")
 
 show_range_signal = input.bool(true, title="Señalar Velas de Gran Rango (Breakout)", group="Rango / Volatilidad")
 
@@ -19,9 +20,10 @@ wpr = ta.wpr(wr_len)
 // --- CÁLCULO: WILLIAMS VIX FIX (Suelo de Mercado) ---
 highest_close = ta.highest(close, vix_len)
 wvf = ((highest_close - low) / highest_close) * 100
-vix_basis = ta.sma(wvf, vix_bblen)
-vix_dev   = vix_mult * ta.stdev(wvf, vix_bblen)
-vix_upper = vix_basis + vix_dev
+vix_basis   = ta.sma(wvf, vix_bblen)
+vix_stdev   = ta.stdev(wvf, vix_bblen)
+vix_upper_aviso    = vix_basis + vix_mult_aviso * vix_stdev
+vix_upper_anomalia = vix_basis + vix_mult_anomalia * vix_stdev
 
 // --- CÁLCULO: RANGO AMPLIO (LARGE RANGE BAR) ---
 atr_val       = ta.atr(14)
@@ -34,11 +36,13 @@ h_os = hline(wr_os, "Sobreventa", color=color.green, linestyle=hline.style_dotte
 fill(h_ob, h_os, color=color.new(color.blue, 90), title="Zona Neutral")
 
 // Fondo de alerta VIX Fix (Potencial suelo/rebote agresivo)
-is_vix_alert = wvf >= vix_upper
-bgcolor(is_vix_alert ? color.new(color.teal, 80) : na, title="VIX Fix Alerta Suelo")
+is_vix_anomalia = wvf >= vix_upper_anomalia
+is_vix_aviso    = wvf >= vix_upper_aviso and not is_vix_anomalia
+vix_bg_color = is_vix_anomalia ? color.new(color.orange, 70) : is_vix_aviso ? color.new(color.teal, 80) : na
+bgcolor(vix_bg_color, title="VIX Fix Alerta Suelo")
 
 // Señales visuales sobre el oscilador
-plotshape(is_vix_alert and ta.crossover(wpr, wr_os), title="Rebote Fuerte Confirmado",
+plotshape((is_vix_aviso or is_vix_anomalia) and ta.crossover(wpr, wr_os), title="Rebote Fuerte Confirmado",
           style=shape.triangleup, location=location.bottom, color=color.green, size=size.small)
 
 plotchar(show_range_signal and is_wide_range, title="Vela Rango Amplio",
