@@ -4,24 +4,31 @@ Guía para Claude Code (y otros asistentes de IA) al trabajar en este repositori
 
 ## Qué es este repositorio
 
-`bot` es una estrategia de trading automático para **NinjaTrader 8**,
-orientada a futuros micro E-mini (**MES**, **MNQ**), basada en conceptos
-de la metodología ICT: **CRT (Candle Range Theory)** para el sesgo
-direccional en un timeframe superior, y **FVG/IFVG (Fair Value Gap /
-Inverse FVG)** como gatillo de entrada en el timeframe de ejecución.
+`bot` contiene **estrategias de trading automático para NinjaTrader 8**,
+orientadas a futuros micro E-mini (**MES**, **MNQ**):
 
-Ver [README.md](README.md) para la explicación funcional completa,
-instrucciones de instalación en NinjaTrader y tabla de parámetros.
+- **`IctCrtFvgStrategy`**: conceptos de la metodología ICT — **CRT
+  (Candle Range Theory)** para el sesgo direccional en un timeframe
+  superior, y **FVG/IFVG (Fair Value Gap / Inverse FVG)** como gatillo
+  de entrada en el timeframe de ejecución.
+- **`DonchianBreakoutStrategy`**: breakout de canal Donchian con
+  órdenes stop pendientes (BuyStop/SellStop) a ambos lados del rango
+  reciente, stop en ATR y target por múltiplo R.
+
+Ver [README.md](README.md) para la explicación funcional completa de
+cada una, instrucciones de instalación en NinjaTrader y tablas de
+parámetros.
 
 ## Codebase structure
 
 ```
 bot/
 ├── indicators/
-│   └── fvg_ifvg.pine              # Indicador visual FVG/IFVG (Pine Script v6, TradingView), solo visualización
+│   └── fvg_ifvg.pine                   # Indicador visual FVG/IFVG (Pine Script v6, TradingView), solo visualización
 ├── ninjatrader/
 │   └── Strategies/
-│       └── IctCrtFvgStrategy.cs   # Estrategia NinjaScript (C#) para NinjaTrader 8: CRT + FVG/IFVG, con gestión de riesgo
+│       ├── IctCrtFvgStrategy.cs        # Estrategia NinjaScript (C#): CRT + FVG/IFVG, con gestión de riesgo
+│       └── DonchianBreakoutStrategy.cs # Estrategia NinjaScript (C#): breakout Donchian con órdenes stop pendientes
 ├── README.md
 └── CLAUDE.md
 ```
@@ -29,13 +36,19 @@ bot/
 - **`indicators/fvg_ifvg.pine`**: indicador Pine Script v6 para
   TradingView. Dibuja zonas FVG/IFVG, PDH/PDL y rangos de sesión
   NY/Londres. No ejecuta órdenes; es la referencia visual de la lógica
-  FVG/IFVG que la estrategia de NinjaTrader reimplementa en C#.
+  FVG/IFVG que `IctCrtFvgStrategy.cs` reimplementa en C#.
 - **`ninjatrader/Strategies/IctCrtFvgStrategy.cs`**: estrategia
   NinjaScript. Usa `AddDataSeries` para una serie de timeframe superior
   (Diario por defecto) donde calcula el sesgo CRT, y opera en el
   timeframe del gráfico usando FVG/IFVG como entrada, con stop/target
   basados en R-múltiplo y controles de riesgo (contratos, operaciones
   por día, pérdida diaria máxima, ventana horaria).
+- **`ninjatrader/Strategies/DonchianBreakoutStrategy.cs`**: estrategia
+  NinjaScript. Mantiene órdenes stop de entrada (`EnterLongStopMarket`
+  / `EnterShortStopMarket`) en los bordes de un canal Donchian mientras
+  está plana, cancela la orden contraria al ejecutarse una, y gestiona
+  stop (ATR) / target (R-múltiplo) y los mismos controles de riesgo que
+  `IctCrtFvgStrategy`.
 
 ## Development workflow
 
@@ -49,7 +62,9 @@ NinjaTrader 8**, no con una toolchain externa:
   **NinjaScript Editor** (F5) dentro de NinjaTrader 8. No hay forma de
   compilar NinjaScript fuera de la aplicación NinjaTrader.
 - **Backtest**: usar **Strategy Analyzer** en NinjaTrader 8 antes de
-  cualquier cambio de lógica de entradas/salidas.
+  cualquier cambio de lógica de entradas/salidas. Al modificar una
+  estrategia, valida esa estrategia específica en Strategy Analyzer, no
+  solo la que originó el cambio.
 - **Indicador Pine**: `indicators/fvg_ifvg.pine` se pega directamente en
   el Pine Editor de TradingView; no requiere build.
 - No hay linter/formatter configurado. Sigue el estilo ya presente en
