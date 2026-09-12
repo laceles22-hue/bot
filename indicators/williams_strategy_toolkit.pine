@@ -1,23 +1,14 @@
 //@version=5
-indicator(title="Williams Strategy Toolkit [LW]", shorttitle="LW Toolkit", overlay=false)
+indicator(title="Williams VIX Fix Oscillator [LW]", shorttitle="LW VIX Fix", overlay=false)
 
 // --- CONFIGURACIÓN ---
-wr_len            = input.int(14, title="%R Periodo", group="Williams %R")
-wr_ob             = input.int(-20, title="%R Sobrecompra", group="Williams %R")
-wr_os             = input.int(-80, title="%R Sobreventa", group="Williams %R")
-
 vix_len           = input.int(22, title="VIX Fix Periodo Lookback", group="Williams VIX Fix")
 vix_bblen         = input.int(20, title="Bandas VIX Periodo", group="Williams VIX Fix")
 vix_mult_aviso    = input.float(2.0, title="Umbral Aviso (Desviaciones)", group="Williams VIX Fix")
 vix_mult_anomalia = input.float(2.5, title="Umbral Anomalía (Desviaciones)", group="Williams VIX Fix")
-
-show_vix_z_lines  = input.bool(true, title="Mostrar Líneas Umbral VIX Fix (z-score)", group="Williams VIX Fix")
+show_vix_z_lines  = input.bool(true, title="Mostrar Líneas Umbral (±σ Aviso / ±σ Anomalía)", group="Williams VIX Fix")
 
 show_range_signal = input.bool(true, title="Señalar Velas de Gran Rango (Breakout)", group="Rango / Volatilidad")
-
-// --- CÁLCULO: WILLIAMS %R ---
-// ta.wpr previene errores internos por rango cero (high == low)
-wpr = ta.wpr(wr_len)
 
 // --- CÁLCULO: WILLIAMS VIX FIX (Suelo de Mercado) ---
 highest_close = ta.highest(close, vix_len)
@@ -31,15 +22,10 @@ vix_z = vix_stdev == 0 ? 0.0 : (wvf - vix_basis) / vix_stdev
 atr_val       = ta.atr(14)
 is_wide_range = (high - low) > (atr_val * 1.6)
 
-// --- DIBUJO ---
-plot(wpr, title="Williams %R", color=color.white, linewidth=2)
-h_ob = hline(wr_ob, "Sobrecompra", color=color.red, linestyle=hline.style_dotted)
-h_os = hline(wr_os, "Sobreventa", color=color.green, linestyle=hline.style_dotted)
-fill(h_ob, h_os, color=color.new(color.blue, 90), title="Zona Neutral")
-
-// Histograma relleno del VIX Fix (z-score): azul en zona positiva, rojo en zona negativa
+// --- DIBUJO: EL OSCILADOR ES EL HISTOGRAMA VIX FIX ---
+// Histograma relleno: azul en zona positiva, rojo en zona negativa
 vix_hist_color = vix_z >= 0 ? color.new(color.blue, 30) : color.new(color.red, 30)
-plot(show_vix_z_lines ? vix_z : na, title="VIX Fix (z-score)", style=plot.style_area, color=vix_hist_color, linewidth=1)
+plot(vix_z, title="VIX Fix (z-score)", style=plot.style_area, color=vix_hist_color, linewidth=1)
 
 // Líneas de referencia del umbral (estructura ±σ aviso / ±σ anomalía)
 h_vix_zero        = hline(show_vix_z_lines ? 0.0 : na, "VIX Fix Z 0", color=color.new(color.gray, 50), linestyle=hline.style_solid)
@@ -53,10 +39,6 @@ is_vix_anomalia = vix_z >= vix_mult_anomalia
 is_vix_aviso    = vix_z >= vix_mult_aviso and not is_vix_anomalia
 vix_bg_color = is_vix_anomalia ? color.new(color.orange, 70) : is_vix_aviso ? color.new(color.teal, 80) : na
 bgcolor(vix_bg_color, title="VIX Fix Alerta Suelo")
-
-// Señales visuales sobre el oscilador
-plotshape((is_vix_aviso or is_vix_anomalia) and ta.crossover(wpr, wr_os), title="Rebote Fuerte Confirmado",
-          style=shape.triangleup, location=location.bottom, color=color.green, size=size.small)
 
 // Triángulos de reversión en cruces del umbral de anomalía (±2.5σ)
 plotshape(ta.crossover(vix_z, vix_mult_anomalia), title="Anomalía Alcista (posible techo)",
