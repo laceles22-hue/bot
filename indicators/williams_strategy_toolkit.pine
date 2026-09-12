@@ -37,8 +37,11 @@ h_ob = hline(wr_ob, "Sobrecompra", color=color.red, linestyle=hline.style_dotted
 h_os = hline(wr_os, "Sobreventa", color=color.green, linestyle=hline.style_dotted)
 fill(h_ob, h_os, color=color.new(color.blue, 90), title="Zona Neutral")
 
+// Histograma relleno del VIX Fix (z-score): azul en zona positiva, rojo en zona negativa
+vix_hist_color = vix_z >= 0 ? color.new(color.blue, 30) : color.new(color.red, 30)
+plot(show_vix_z_lines ? vix_z : na, title="VIX Fix (z-score)", style=plot.style_area, color=vix_hist_color, linewidth=1)
+
 // Líneas de referencia del umbral (estructura ±σ aviso / ±σ anomalía)
-plot(show_vix_z_lines ? vix_z : na, title="VIX Fix (z-score)", color=color.aqua, linewidth=1)
 h_vix_zero        = hline(show_vix_z_lines ? 0.0 : na, "VIX Fix Z 0", color=color.new(color.gray, 50), linestyle=hline.style_solid)
 h_aviso_pos       = hline(show_vix_z_lines ? vix_mult_aviso : na, "+σ Aviso", color=color.teal, linestyle=hline.style_dotted)
 h_aviso_neg       = hline(show_vix_z_lines ? -vix_mult_aviso : na, "−σ Aviso", color=color.teal, linestyle=hline.style_dotted)
@@ -53,6 +56,12 @@ bgcolor(vix_bg_color, title="VIX Fix Alerta Suelo")
 
 // Señales visuales sobre el oscilador
 plotshape((is_vix_aviso or is_vix_anomalia) and ta.crossover(wpr, wr_os), title="Rebote Fuerte Confirmado",
+          style=shape.triangleup, location=location.bottom, color=color.green, size=size.small)
+
+// Triángulos de reversión en cruces del umbral de anomalía (±2.5σ)
+plotshape(ta.crossover(vix_z, vix_mult_anomalia), title="Anomalía Alcista (posible techo)",
+          style=shape.triangledown, location=location.top, color=color.red, size=size.small)
+plotshape(ta.crossunder(vix_z, -vix_mult_anomalia), title="Anomalía Bajista (posible suelo)",
           style=shape.triangleup, location=location.bottom, color=color.green, size=size.small)
 
 plotchar(show_range_signal and is_wide_range, title="Vela Rango Amplio",
