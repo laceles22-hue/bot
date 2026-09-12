@@ -48,12 +48,13 @@ vix_bg_color = is_vix_anomalia ? color.new(color.orange, 70) : is_vix_aviso ? co
 bgcolor(vix_bg_color, title="VIX Fix Alerta Suelo")
 
 // Triángulos de reversión en cruces del umbral de anomalía (±2.5σ)
-// Spike de miedo (+anomalía) = capitulación → posible suelo/rebote alcista
+// Ubicados junto al pico/valle real que dispara la señal, no al lado opuesto del panel.
+// Spike de miedo (+anomalía, pico rojo hacia arriba) = capitulación → posible suelo/rebote alcista
 plotshape(ta.crossover(vix_z, vix_mult_anomalia), title="Spike de Miedo (posible suelo/rebote)",
-          style=shape.triangleup, location=location.bottom, color=color.green, size=size.small)
-// Calma extrema (−anomalía) = complacencia → posible techo/agotamiento
+          style=shape.triangledown, location=location.top, color=color.green, size=size.small)
+// Calma extrema (−anomalía, valle azul hacia abajo) = complacencia → posible techo/agotamiento
 plotshape(ta.crossunder(vix_z, -vix_mult_anomalia), title="Complacencia Extrema (posible techo)",
-          style=shape.triangledown, location=location.top, color=color.red, size=size.small)
+          style=shape.triangleup, location=location.bottom, color=color.red, size=size.small)
 
 plotchar(show_range_signal and is_wide_range, title="Vela Rango Amplio",
          char="⚡", location=location.top, color=color.yellow, size=size.tiny)
