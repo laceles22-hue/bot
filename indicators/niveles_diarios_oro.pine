@@ -21,6 +21,52 @@ indicator("Niveles Diarios Oro (XAUUSD)", shorttitle="Niveles Oro", overlay=true
 lineStyleFromInput(s) =>
     s == "Sólida" ? line.style_solid : s == "Discontinua" ? line.style_dashed : line.style_dotted
 
+// ============================= DEFINICIÓN DEL DÍA (FUTUROS) =============================
+// El oro en futuros (COMEX/GC) opera de 18:00 a 17:00 hora de Nueva York, con una pausa de
+// mantenimiento de 17:00 a 18:00 ET. La mayoría de las herramientas de "niveles del día"
+// (incluidas las academias que usan ese corte para el Máx/Mín/Cierre anterior y el pivote)
+// arman el "día" con ese horario en vez de la medianoche del gráfico. Si tu feed ya respeta
+// ese corte de forma nativa, podés desactivar esta opción y usar el día del gráfico.
+grpFutDay     = "Definición del día (futuros)"
+useFuturesDay = input.bool(true, "Definir el día como sesión de futuros (18:00-17:00 hora NY)", group=grpFutDay, tooltip="Recomendado para XAUUSD/GC en futuros (COMEX). Desactivalo si tu símbolo/feed ya define el día con ese mismo corte horario.")
+futSession    = input.session("1800-1700", "Horario de la sesión de futuros (HHMM-HHMM)", group=grpFutDay)
+futTimezone   = input.string("America/New_York", "Zona horaria de la sesión de futuros", group=grpFutDay)
+
+inFutDay = not na(time(timeframe.period, futSession, futTimezone))
+futDayId = year(time, futTimezone) * 10000 + month(time, futTimezone) * 100 + dayofmonth(time, futTimezone)
+
+var float runFutHigh   = na
+var float runFutLow    = na
+var float runFutClose  = na
+var float prevFutHigh  = na
+var float prevFutLow   = na
+var float prevFutClose = na
+var float futDayOpen   = na
+var bool  wasInFutDay  = false
+var int   lastFutDay   = na
+
+futStart = inFutDay and (not wasInFutDay or futDayId != lastFutDay)
+futEnd   = wasInFutDay and not inFutDay
+
+if futStart
+    runFutHigh := high
+    runFutLow  := low
+    futDayOpen := open
+    lastFutDay := futDayId
+else if inFutDay
+    runFutHigh := math.max(runFutHigh, high)
+    runFutLow  := math.min(runFutLow, low)
+
+if inFutDay
+    runFutClose := close
+
+if futEnd
+    prevFutHigh  := runFutHigh
+    prevFutLow   := runFutLow
+    prevFutClose := runFutClose
+
+wasInFutDay := inFutDay
+
 // ============================= APERTURAS Y MÁX/MÍN ANTERIOR =============================
 grpDW = "Día / Semana anterior"
 showDOpen  = input.bool(true, "Apertura diaria", group=grpDW)
@@ -42,9 +88,18 @@ dwLineStyle   = lineStyleFromInput(dwStyleIn)
 pdhlLineStyle = lineStyleFromInput(pdhlStyleIn)
 
 // Día anterior
-newDayBar = ta.change(time("D")) != 0
-pdHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
-pdLow  = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+// Si "useFuturesDay" está activo, la apertura se toma al empezar la sesión de futuros
+// (18:00 NY) y el Máx/Mín/Cierre anterior al cerrarla (17:00 NY); si no, se usa el día
+// tal como lo define el símbolo del gráfico (comportamiento anterior).
+chartNewDayBar = ta.change(time("D")) != 0
+chartPdHigh    = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+chartPdLow     = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+
+dOpenTrigger = useFuturesDay ? futStart : chartNewDayBar
+dOpenValue   = useFuturesDay ? futDayOpen : open
+pdhlTrigger  = useFuturesDay ? futEnd : chartNewDayBar
+pdHigh       = useFuturesDay ? prevFutHigh : chartPdHigh
+pdLow        = useFuturesDay ? prevFutLow  : chartPdLow
 
 var line  dOpenLine = na
 var label dOpenLbl  = na
@@ -53,15 +108,17 @@ var line  pdlLine = na
 var label pdhLbl  = na
 var label pdlLbl  = na
 
-if newDayBar
+if dOpenTrigger
     if showDOpen
         if not na(dOpenLine)
             line.delete(dOpenLine)
         if not na(dOpenLbl)
             label.delete(dOpenLbl)
-        dOpenLine := line.new(bar_index, open, bar_index, open, color=dOpenColor, width=dwWidth, style=dwLineStyle)
+        dOpenLine := line.new(bar_index, dOpenValue, bar_index, dOpenValue, color=dOpenColor, width=dwWidth, style=dwLineStyle)
         if showDWLabels
-            dOpenLbl := label.new(bar_index, open, "Apertura Día", style=label.style_label_left, color=color.new(color.white, 100), textcolor=dOpenColor, size=size.tiny)
+            dOpenLbl := label.new(bar_index, dOpenValue, "Apertura Día", style=label.style_label_left, color=color.new(color.white, 100), textcolor=dOpenColor, size=size.tiny)
+
+if pdhlTrigger
     if showPDHL and not na(pdHigh)
         if not na(pdhLine)
             line.delete(pdhLine)
@@ -359,9 +416,17 @@ showPivLabels = input.bool(true, "Mostrar etiquetas", group=grpPiv)
 pivLineStyle = lineStyleFromInput(pivStyleIn)
 
 pivotTf = pivotTfIn == "Semanal" ? "W" : pivotTfIn == "Mensual" ? "M" : "D"
+useFuturesDayForPivot = pivotTfIn == "Diario" and useFuturesDay
 
-[pivH, pivL, pivC] = request.security(syminfo.tickerid, pivotTf, [high[1], low[1], close[1]], lookahead=barmerge.lookahead_off)
-newPivotBar = ta.change(time(pivotTf)) != 0
+[secPivH, secPivL, secPivC] = request.security(syminfo.tickerid, pivotTf, [high[1], low[1], close[1]], lookahead=barmerge.lookahead_off)
+secNewPivotBar = ta.change(time(pivotTf)) != 0
+
+// En diario, si el corte de día es el de futuros (18:00-17:00 NY), el Máx/Mín/Cierre del
+// pivote sale de esa sesión en vez del día que define el gráfico (mismo criterio que PDH/PDL).
+pivH = useFuturesDayForPivot ? prevFutHigh  : secPivH
+pivL = useFuturesDayForPivot ? prevFutLow   : secPivL
+pivC = useFuturesDayForPivot ? prevFutClose : secPivC
+newPivotBar = useFuturesDayForPivot ? futEnd : secNewPivotBar
 
 pp = (pivH + pivL + pivC) / 3
 r1 = 2 * pp - pivL
