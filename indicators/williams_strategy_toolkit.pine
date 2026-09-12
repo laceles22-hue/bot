@@ -23,8 +23,10 @@ atr_val       = ta.atr(14)
 is_wide_range = (high - low) > (atr_val * 1.6)
 
 // --- DIBUJO: EL OSCILADOR ES EL HISTOGRAMA VIX FIX ---
-// Histograma relleno: azul en zona positiva, rojo en zona negativa
-vix_hist_color = vix_z >= 0 ? color.new(color.blue, 30) : color.new(color.red, 30)
+// El VIX Fix sube cuando el precio CAE con fuerza (miedo/volatilidad bajista) y
+// baja cuando el precio sube tranquilo. Por eso: rojo en zona positiva (caída/miedo),
+// azul en zona negativa (calma/subida) — así el color queda alineado con la dirección real del precio.
+vix_hist_color = vix_z >= 0 ? color.new(color.red, 30) : color.new(color.blue, 30)
 plot(vix_z, title="VIX Fix (z-score)", style=plot.style_area, color=vix_hist_color, linewidth=1)
 
 // Líneas de referencia del umbral (estructura ±σ aviso / ±σ anomalía)
@@ -41,10 +43,12 @@ vix_bg_color = is_vix_anomalia ? color.new(color.orange, 70) : is_vix_aviso ? co
 bgcolor(vix_bg_color, title="VIX Fix Alerta Suelo")
 
 // Triángulos de reversión en cruces del umbral de anomalía (±2.5σ)
-plotshape(ta.crossover(vix_z, vix_mult_anomalia), title="Anomalía Alcista (posible techo)",
-          style=shape.triangledown, location=location.top, color=color.red, size=size.small)
-plotshape(ta.crossunder(vix_z, -vix_mult_anomalia), title="Anomalía Bajista (posible suelo)",
+// Spike de miedo (+anomalía) = capitulación → posible suelo/rebote alcista
+plotshape(ta.crossover(vix_z, vix_mult_anomalia), title="Spike de Miedo (posible suelo/rebote)",
           style=shape.triangleup, location=location.bottom, color=color.green, size=size.small)
+// Calma extrema (−anomalía) = complacencia → posible techo/agotamiento
+plotshape(ta.crossunder(vix_z, -vix_mult_anomalia), title="Complacencia Extrema (posible techo)",
+          style=shape.triangledown, location=location.top, color=color.red, size=size.small)
 
 plotchar(show_range_signal and is_wide_range, title="Vela Rango Amplio",
          char="⚡", location=location.top, color=color.yellow, size=size.tiny)
