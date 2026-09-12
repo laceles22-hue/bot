@@ -126,7 +126,7 @@ calculado desde el momento en que se coloca la orden.
 | Ruptura | Buffer de disparo (ticks) | `2` | Ticks más allá del canal para el precio de la orden stop. |
 | Ruptura | Ancho mínimo del canal (x ATR) | `0.5` | `0` = sin filtro. |
 | Ruptura | Periodo ATR | `14` | |
-| Dirección | Habilitar rupturas al alza / a la baja | `true` / `true` | Para operar un solo lado (p. ej. solo `SellStop`), desactiva el otro. |
+| Dirección | Habilitar rupturas al alza / a la baja | `false` / `true` | Por defecto **solo lado corto** (`SellStop`), como en el patrón original. Activa el alza si también quieres `BuyStop`. |
 | Salida | Stop loss (x ATR) | `1.0` | Distancia del stop desde el precio de entrada. |
 | Salida | Múltiplo Riesgo:Beneficio (R) | `2.0` | Take profit = riesgo × este múltiplo. |
 | Riesgo | Contratos | `1` | |

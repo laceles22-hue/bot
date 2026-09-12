@@ -21,10 +21,11 @@ using NinjaTrader.NinjaScript.DrawingTools;
 // Lógica:
 //   1. Canal Donchian de N velas (máximo/mínimo de las últimas N velas,
 //      sin incluir la vela en formación) define el "rango reciente".
-//   2. Mientras está plano, coloca (y va actualizando) dos órdenes stop
-//      de entrada: BuyStop justo por encima del máximo del canal y
+//   2. Mientras está plano, coloca (y va actualizando) órdenes stop de
+//      entrada: BuyStop justo por encima del máximo del canal y/o
 //      SellStop justo por debajo del mínimo — igual que una orden stop
-//      pendiente colocada manualmente en la plataforma.
+//      pendiente colocada manualmente en la plataforma. Por defecto
+//      solo el lado corto (SellStop) está habilitado.
 //   3. En cuanto una se ejecuta (ruptura confirmada), se cancela la
 //      contraria y se define stop loss (ATR) y profit target
 //      (múltiplo R) para la posición.
@@ -94,7 +95,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				MinChannelAtrMult = 0.5;
 				AtrPeriod = 14;
 
-				EnableLongBreakouts = true;
+				EnableLongBreakouts = false;
 				EnableShortBreakouts = true;
 
 				StopLossAtrMult = 1.0;
