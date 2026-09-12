@@ -116,7 +116,7 @@ if dOpenTrigger
             label.delete(dOpenLbl)
         dOpenLine := line.new(bar_index, dOpenValue, bar_index, dOpenValue, color=dOpenColor, width=dwWidth, style=dwLineStyle)
         if showDWLabels
-            dOpenLbl := label.new(bar_index, dOpenValue, "Apertura Día", style=label.style_label_left, color=color.new(color.white, 100), textcolor=dOpenColor, size=size.tiny)
+            dOpenLbl := label.new(bar_index, dOpenValue, "APERTURA DÍA", style=label.style_label_left, color=color.new(color.white, 100), textcolor=dOpenColor, size=size.tiny)
 
 if pdhlTrigger
     if showPDHL and not na(pdHigh)
@@ -131,8 +131,8 @@ if pdhlTrigger
         pdhLine := line.new(bar_index, pdHigh, bar_index, pdHigh, color=pdhColor, width=dwWidth, style=pdhlLineStyle)
         pdlLine := line.new(bar_index, pdLow, bar_index, pdLow, color=pdlColor, width=dwWidth, style=pdhlLineStyle)
         if showDWLabels
-            pdhLbl := label.new(bar_index, pdHigh, "Res. Mayor (día ant.)", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pdhColor, size=size.tiny)
-            pdlLbl := label.new(bar_index, pdLow, "Sop. Mayor (día ant.)", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pdlColor, size=size.tiny)
+            pdhLbl := label.new(bar_index, pdHigh, "RESISTENCIA MAYOR", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pdhColor, size=size.tiny)
+            pdlLbl := label.new(bar_index, pdLow, "SOPORTE MAYOR", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pdlColor, size=size.tiny)
 
 if not na(dOpenLine)
     line.set_x2(dOpenLine, bar_index)
@@ -165,7 +165,7 @@ if newWeekBar
             label.delete(wOpenLbl)
         wOpenLine := line.new(bar_index, open, bar_index, open, color=wOpenColor, width=dwWidth, style=dwLineStyle)
         if showDWLabels
-            wOpenLbl := label.new(bar_index, open, "Apertura Semana", style=label.style_label_left, color=color.new(color.white, 100), textcolor=wOpenColor, size=size.tiny)
+            wOpenLbl := label.new(bar_index, open, "APERTURA SEMANA", style=label.style_label_left, color=color.new(color.white, 100), textcolor=wOpenColor, size=size.tiny)
     if showPWHL and not na(pwHigh)
         if not na(pwhLine)
             line.delete(pwhLine)
@@ -178,8 +178,8 @@ if newWeekBar
         pwhLine := line.new(bar_index, pwHigh, bar_index, pwHigh, color=pwhColor, width=dwWidth, style=pdhlLineStyle)
         pwlLine := line.new(bar_index, pwLow, bar_index, pwLow, color=pwlColor, width=dwWidth, style=pdhlLineStyle)
         if showDWLabels
-            pwhLbl := label.new(bar_index, pwHigh, "Máx Semana Ant.", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pwhColor, size=size.tiny)
-            pwlLbl := label.new(bar_index, pwLow, "Mín Semana Ant.", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pwlColor, size=size.tiny)
+            pwhLbl := label.new(bar_index, pwHigh, "RESISTENCIA MAYOR SEMANAL", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pwhColor, size=size.tiny)
+            pwlLbl := label.new(bar_index, pwLow, "SOPORTE MAYOR SEMANAL", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pwlColor, size=size.tiny)
 
 if not na(wOpenLine)
     line.set_x2(wOpenLine, bar_index)
@@ -256,8 +256,8 @@ if showAsiaHl and asiaEnd and not na(prevAsiaHigh)
     asiaHLine := line.new(bar_index, prevAsiaHigh, bar_index, prevAsiaHigh, color=asiaHighColor, width=asiaWidth, style=asiaLineStyle)
     asiaLLine := line.new(bar_index, prevAsiaLow, bar_index, prevAsiaLow, color=asiaLowColor, width=asiaWidth, style=asiaLineStyle)
     if showAsiaLabels
-        asiaHLbl := label.new(bar_index, prevAsiaHigh, "Asia H", style=label.style_label_left, color=color.new(color.white, 100), textcolor=asiaHighColor, size=size.tiny)
-        asiaLLbl := label.new(bar_index, prevAsiaLow, "Asia L", style=label.style_label_left, color=color.new(color.white, 100), textcolor=asiaLowColor, size=size.tiny)
+        asiaHLbl := label.new(bar_index, prevAsiaHigh, "RESISTENCIA ASIA", style=label.style_label_left, color=color.new(color.white, 100), textcolor=asiaHighColor, size=size.tiny)
+        asiaLLbl := label.new(bar_index, prevAsiaLow, "SOPORTE ASIA", style=label.style_label_left, color=color.new(color.white, 100), textcolor=asiaLowColor, size=size.tiny)
 
 if showAsiaHl and not na(asiaHLine)
     line.set_x2(asiaHLine, bar_index)
@@ -324,7 +324,7 @@ if ldnStart
             label.delete(ldnOpenLbl)
         ldnOpenLine := line.new(bar_index, ldnOpenVal, bar_index, ldnOpenVal, color=ldnOpenColor, width=ldnWidth, style=ldnLineStyle)
         if showLdnLabels
-            ldnOpenLbl := label.new(bar_index, ldnOpenVal, "Apertura Londres", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnOpenColor, size=size.tiny)
+            ldnOpenLbl := label.new(bar_index, ldnOpenVal, "APERTURA LONDRES", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnOpenColor, size=size.tiny)
 
 if showLdnOpen and not na(ldnOpenLine)
     line.set_x2(ldnOpenLine, bar_index)
@@ -350,8 +350,8 @@ if showLdnHl and ldnEnd and not na(prevLdnHigh)
     ldnHLine := line.new(bar_index, prevLdnHigh, bar_index, prevLdnHigh, color=ldnHighColor, width=ldnWidth, style=ldnLineStyle)
     ldnLLine := line.new(bar_index, prevLdnLow, bar_index, prevLdnLow, color=ldnLowColor, width=ldnWidth, style=ldnLineStyle)
     if showLdnLabels
-        ldnHLbl := label.new(bar_index, prevLdnHigh, "Londres H", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnHighColor, size=size.tiny)
-        ldnLLbl := label.new(bar_index, prevLdnLow, "Londres L", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnLowColor, size=size.tiny)
+        ldnHLbl := label.new(bar_index, prevLdnHigh, "RESISTENCIA LONDRES", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnHighColor, size=size.tiny)
+        ldnLLbl := label.new(bar_index, prevLdnLow, "SOPORTE LONDRES", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnLowColor, size=size.tiny)
 
 if showLdnHl and not na(ldnHLine)
     line.set_x2(ldnHLine, bar_index)
@@ -417,7 +417,7 @@ if nyStart
             label.delete(nyOpenLbl)
         nyOpenLine := line.new(bar_index, open, bar_index, open, color=nyOpenColor, width=nyWidth, style=nyLineStyle)
         if showNYLabels
-            nyOpenLbl := label.new(bar_index, open, "Apertura NY", style=label.style_label_left, color=color.new(color.white, 100), textcolor=nyOpenColor, size=size.tiny)
+            nyOpenLbl := label.new(bar_index, open, "APERTURA NY", style=label.style_label_left, color=color.new(color.white, 100), textcolor=nyOpenColor, size=size.tiny)
 
 if showNYOpen and not na(nyOpenLine)
     line.set_x2(nyOpenLine, bar_index)
@@ -437,7 +437,7 @@ if midnightBar
             label.delete(midnightLbl)
         midnightLine := line.new(bar_index, open, bar_index, open, color=midnightColor, width=nyWidth, style=nyLineStyle)
         if showNYLabels
-            midnightLbl := label.new(bar_index, open, "Medianoche NY", style=label.style_label_left, color=color.new(color.white, 100), textcolor=midnightColor, size=size.tiny)
+            midnightLbl := label.new(bar_index, open, "MEDIANOCHE NY", style=label.style_label_left, color=color.new(color.white, 100), textcolor=midnightColor, size=size.tiny)
 
 if showMidnight and not na(midnightLine)
     line.set_x2(midnightLine, bar_index)
@@ -526,14 +526,14 @@ if showPivots and newPivotBar and not na(pp)
         s3Line := line.new(bar_index, s3, bar_index, s3, color=color.new(sColor, 0), width=pivWidth, style=pivLineStyle)
 
     if showPivLabels
-        ppLbl := label.new(bar_index, pp, "PP", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ppColor, size=size.tiny)
-        r1Lbl := label.new(bar_index, r1, "R1", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
-        r2Lbl := label.new(bar_index, r2, "R2", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
-        s1Lbl := label.new(bar_index, s1, "S1", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
-        s2Lbl := label.new(bar_index, s2, "S2", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
+        ppLbl := label.new(bar_index, pp, "PIVOT CENTRAL", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ppColor, size=size.tiny)
+        r1Lbl := label.new(bar_index, r1, "RESISTENCIA", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
+        r2Lbl := label.new(bar_index, r2, "RESISTENCIA 2", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
+        s1Lbl := label.new(bar_index, s1, "SOPORTE", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
+        s2Lbl := label.new(bar_index, s2, "SOPORTE 2", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
         if showR3S3
-            r3Lbl := label.new(bar_index, r3, "R3", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
-            s3Lbl := label.new(bar_index, s3, "S3", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
+            r3Lbl := label.new(bar_index, r3, "RESISTENCIA 3", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
+            s3Lbl := label.new(bar_index, s3, "SOPORTE 3", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
 
 if showPivots and not na(ppLine)
     line.set_x2(ppLine, bar_index)
@@ -619,14 +619,14 @@ f_drawPivotSet(ps, h, l, c, trigger, tag, ppCol, rCol, sCol, w, styleIn, showLbl
             ps.s3Line := line.new(bar_index, sS3, bar_index, sS3, color=color.new(sCol, 0), width=w, style=styleIn)
 
         if showLbl
-            ps.ppLbl := label.new(bar_index, sPP, "PP " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=ppCol, size=size.tiny)
-            ps.r1Lbl := label.new(bar_index, sR1, "R1 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
-            ps.r2Lbl := label.new(bar_index, sR2, "R2 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
-            ps.s1Lbl := label.new(bar_index, sS1, "S1 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
-            ps.s2Lbl := label.new(bar_index, sS2, "S2 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
+            ps.ppLbl := label.new(bar_index, sPP, "PIVOT " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=ppCol, size=size.tiny)
+            ps.r1Lbl := label.new(bar_index, sR1, "RESISTENCIA " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
+            ps.r2Lbl := label.new(bar_index, sR2, "RESISTENCIA 2 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
+            ps.s1Lbl := label.new(bar_index, sS1, "SOPORTE " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
+            ps.s2Lbl := label.new(bar_index, sS2, "SOPORTE 2 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
             if showR3S3In
-                ps.r3Lbl := label.new(bar_index, sR3, "R3 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
-                ps.s3Lbl := label.new(bar_index, sS3, "S3 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
+                ps.r3Lbl := label.new(bar_index, sR3, "RESISTENCIA 3 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
+                ps.s3Lbl := label.new(bar_index, sS3, "SOPORTE 3 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
 
     if not na(ps.ppLine)
         line.set_x2(ps.ppLine, bar_index)
@@ -653,9 +653,9 @@ var PivSet ldnPivSet  = PivSet.new()
 var PivSet nyPivSet   = PivSet.new()
 
 if showAsiaPivot
-    asiaPivSet := f_drawPivotSet(asiaPivSet, prevAsiaHigh, prevAsiaLow, prevAsiaClose, asiaEnd, "Asia", asiaPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
+    asiaPivSet := f_drawPivotSet(asiaPivSet, prevAsiaHigh, prevAsiaLow, prevAsiaClose, asiaEnd, "ASIA", asiaPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
 if showLdnPivot
-    ldnPivSet := f_drawPivotSet(ldnPivSet, prevLdnHigh, prevLdnLow, prevLdnClose, ldnEnd, "Londres", ldnPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
+    ldnPivSet := f_drawPivotSet(ldnPivSet, prevLdnHigh, prevLdnLow, prevLdnClose, ldnEnd, "LONDRES", ldnPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
 if showNYPivot
     nyPivSet := f_drawPivotSet(nyPivSet, prevNYHigh, prevNYLow, prevNYClose, nyEnd, "NY", nyPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
 
