@@ -207,10 +207,12 @@ asiaLineStyle = lineStyleFromInput(asiaStyleIn)
 inAsia = not na(time(timeframe.period, asiaSession, asiaTimezone))
 asiaDayId = year(time, asiaTimezone) * 10000 + month(time, asiaTimezone) * 100 + dayofmonth(time, asiaTimezone)
 
-var float runAsiaHigh  = na
-var float runAsiaLow   = na
-var float prevAsiaHigh = na
-var float prevAsiaLow  = na
+var float runAsiaHigh   = na
+var float runAsiaLow    = na
+var float runAsiaClose  = na
+var float prevAsiaHigh  = na
+var float prevAsiaLow   = na
+var float prevAsiaClose = na
 var bool  wasInAsia     = false
 var int   lastAsiaDay   = na
 
@@ -227,9 +229,13 @@ else if inAsia
     runAsiaHigh := math.max(runAsiaHigh, high)
     runAsiaLow  := math.min(runAsiaLow, low)
 
+if inAsia
+    runAsiaClose := close
+
 if asiaEnd
-    prevAsiaHigh := runAsiaHigh
-    prevAsiaLow  := runAsiaLow
+    prevAsiaHigh  := runAsiaHigh
+    prevAsiaLow   := runAsiaLow
+    prevAsiaClose := runAsiaClose
 
 wasInAsia := inAsia
 
@@ -277,10 +283,12 @@ ldnLineStyle = lineStyleFromInput(ldnStyleIn)
 inLdn = not na(time(timeframe.period, ldnSession, ldnTimezone))
 ldnDayId = year(time, ldnTimezone) * 10000 + month(time, ldnTimezone) * 100 + dayofmonth(time, ldnTimezone)
 
-var float runLdnHigh  = na
-var float runLdnLow   = na
-var float prevLdnHigh = na
-var float prevLdnLow  = na
+var float runLdnHigh   = na
+var float runLdnLow    = na
+var float runLdnClose  = na
+var float prevLdnHigh  = na
+var float prevLdnLow   = na
+var float prevLdnClose = na
 var bool  wasInLdn     = false
 var int   lastLdnDay   = na
 
@@ -295,9 +303,13 @@ else if inLdn
     runLdnHigh := math.max(runLdnHigh, high)
     runLdnLow  := math.min(runLdnLow, low)
 
+if inLdn
+    runLdnClose := close
+
 if ldnEnd
-    prevLdnHigh := runLdnHigh
-    prevLdnLow  := runLdnLow
+    prevLdnHigh  := runLdnHigh
+    prevLdnLow   := runLdnLow
+    prevLdnClose := runLdnClose
 
 var float ldnOpenVal = na
 var line  ldnOpenLine = na
@@ -362,7 +374,37 @@ showNYLabels = input.bool(true, "Mostrar etiquetas", group=grpNY)
 nyLineStyle = lineStyleFromInput(nyStyleIn)
 
 inNY = not na(time(timeframe.period, nySession, nyTimezone))
-nyStart = inNY and not inNY[1]
+nyDayId = year(time, nyTimezone) * 10000 + month(time, nyTimezone) * 100 + dayofmonth(time, nyTimezone)
+
+var float runNYHigh   = na
+var float runNYLow    = na
+var float runNYClose  = na
+var float prevNYHigh  = na
+var float prevNYLow   = na
+var float prevNYClose = na
+var bool  wasInNY      = false
+var int   lastNYDay    = na
+
+nyStart = inNY and (not wasInNY or nyDayId != lastNYDay)
+nyEnd   = wasInNY and not inNY
+
+if nyStart
+    runNYHigh := high
+    runNYLow  := low
+    lastNYDay := nyDayId
+else if inNY
+    runNYHigh := math.max(runNYHigh, high)
+    runNYLow  := math.min(runNYLow, low)
+
+if inNY
+    runNYClose := close
+
+if nyEnd
+    prevNYHigh  := runNYHigh
+    prevNYLow   := runNYLow
+    prevNYClose := runNYClose
+
+wasInNY := inNY
 
 var line  nyOpenLine = na
 var label nyOpenLbl  = na
@@ -511,6 +553,111 @@ if showPivots and not na(ppLine)
         if not na(r3Lbl)
             label.set_x(r3Lbl, bar_index)
             label.set_x(s3Lbl, bar_index)
+
+// ============================= PIVOTES DE SESIÓN (ASIA / LONDRES / NUEVA YORK) =============================
+// Mismo pivote clásico (PP/R1-R3/S1-S3) que el bloque anterior, pero calculado con el
+// Alto/Bajo/Cierre de cada sesión (no del día completo) — el "Pivot Londres" que se ve en
+// herramientas como FlowScanner es este mismo criterio aplicado a la sesión de Londres.
+// Reutiliza grosor, estilo, etiquetas y colores de R/S del bloque de Pivotes de arriba;
+// cada sesión solo define su propio color de PP para poder distinguirlas entre sí.
+grpSessPiv = "Pivotes de sesión (Asia/Londres/NY)"
+showAsiaPivot = input.bool(true, "Mostrar pivote de sesión Asia", group=grpSessPiv)
+asiaPivColor  = input.color(color.new(color.orange, 0), "Color PP Asia", group=grpSessPiv)
+showLdnPivot  = input.bool(true, "Mostrar pivote de sesión Londres", group=grpSessPiv)
+ldnPivColor   = input.color(color.new(color.fuchsia, 0), "Color PP Londres", group=grpSessPiv)
+showNYPivot   = input.bool(true, "Mostrar pivote de sesión Nueva York", group=grpSessPiv)
+nyPivColor    = input.color(color.new(color.lime, 0), "Color PP Nueva York", group=grpSessPiv)
+
+type PivSet
+    line  ppLine
+    line  r1Line
+    line  r2Line
+    line  r3Line
+    line  s1Line
+    line  s2Line
+    line  s3Line
+    label ppLbl
+    label r1Lbl
+    label r2Lbl
+    label r3Lbl
+    label s1Lbl
+    label s2Lbl
+    label s3Lbl
+
+f_drawPivotSet(ps, h, l, c, trigger, tag, ppCol, rCol, sCol, w, styleIn, showLbl, showR3S3In) =>
+    if trigger and not na(h) and not na(l) and not na(c)
+        sPP = (h + l + c) / 3
+        sR1 = 2 * sPP - l
+        sS1 = 2 * sPP - h
+        sR2 = sPP + (h - l)
+        sS2 = sPP - (h - l)
+        sR3 = h + 2 * (sPP - l)
+        sS3 = l - 2 * (h - sPP)
+
+        f_delLine(ps.ppLine)
+        f_delLine(ps.r1Line)
+        f_delLine(ps.r2Line)
+        f_delLine(ps.r3Line)
+        f_delLine(ps.s1Line)
+        f_delLine(ps.s2Line)
+        f_delLine(ps.s3Line)
+        f_delLbl(ps.ppLbl)
+        f_delLbl(ps.r1Lbl)
+        f_delLbl(ps.r2Lbl)
+        f_delLbl(ps.r3Lbl)
+        f_delLbl(ps.s1Lbl)
+        f_delLbl(ps.s2Lbl)
+        f_delLbl(ps.s3Lbl)
+
+        ps.ppLine := line.new(bar_index, sPP, bar_index, sPP, color=ppCol, width=w, style=styleIn)
+        ps.r1Line := line.new(bar_index, sR1, bar_index, sR1, color=color.new(rCol, 40), width=w, style=styleIn)
+        ps.r2Line := line.new(bar_index, sR2, bar_index, sR2, color=color.new(rCol, 20), width=w, style=styleIn)
+        ps.s1Line := line.new(bar_index, sS1, bar_index, sS1, color=color.new(sCol, 40), width=w, style=styleIn)
+        ps.s2Line := line.new(bar_index, sS2, bar_index, sS2, color=color.new(sCol, 20), width=w, style=styleIn)
+        if showR3S3In
+            ps.r3Line := line.new(bar_index, sR3, bar_index, sR3, color=color.new(rCol, 0), width=w, style=styleIn)
+            ps.s3Line := line.new(bar_index, sS3, bar_index, sS3, color=color.new(sCol, 0), width=w, style=styleIn)
+
+        if showLbl
+            ps.ppLbl := label.new(bar_index, sPP, "PP " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=ppCol, size=size.tiny)
+            ps.r1Lbl := label.new(bar_index, sR1, "R1 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
+            ps.r2Lbl := label.new(bar_index, sR2, "R2 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
+            ps.s1Lbl := label.new(bar_index, sS1, "S1 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
+            ps.s2Lbl := label.new(bar_index, sS2, "S2 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
+            if showR3S3In
+                ps.r3Lbl := label.new(bar_index, sR3, "R3 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=rCol, size=size.tiny)
+                ps.s3Lbl := label.new(bar_index, sS3, "S3 " + tag, style=label.style_label_left, color=color.new(color.white, 100), textcolor=sCol, size=size.tiny)
+
+    if not na(ps.ppLine)
+        line.set_x2(ps.ppLine, bar_index)
+        line.set_x2(ps.r1Line, bar_index)
+        line.set_x2(ps.r2Line, bar_index)
+        line.set_x2(ps.s1Line, bar_index)
+        line.set_x2(ps.s2Line, bar_index)
+        if not na(ps.ppLbl)
+            label.set_x(ps.ppLbl, bar_index)
+            label.set_x(ps.r1Lbl, bar_index)
+            label.set_x(ps.r2Lbl, bar_index)
+            label.set_x(ps.s1Lbl, bar_index)
+            label.set_x(ps.s2Lbl, bar_index)
+        if showR3S3In and not na(ps.r3Line)
+            line.set_x2(ps.r3Line, bar_index)
+            line.set_x2(ps.s3Line, bar_index)
+            if not na(ps.r3Lbl)
+                label.set_x(ps.r3Lbl, bar_index)
+                label.set_x(ps.s3Lbl, bar_index)
+    ps
+
+var PivSet asiaPivSet = PivSet.new()
+var PivSet ldnPivSet  = PivSet.new()
+var PivSet nyPivSet   = PivSet.new()
+
+if showAsiaPivot
+    asiaPivSet := f_drawPivotSet(asiaPivSet, prevAsiaHigh, prevAsiaLow, prevAsiaClose, asiaEnd, "Asia", asiaPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
+if showLdnPivot
+    ldnPivSet := f_drawPivotSet(ldnPivSet, prevLdnHigh, prevLdnLow, prevLdnClose, ldnEnd, "Londres", ldnPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
+if showNYPivot
+    nyPivSet := f_drawPivotSet(nyPivSet, prevNYHigh, prevNYLow, prevNYClose, nyEnd, "NY", nyPivColor, rColor, sColor, pivWidth, pivLineStyle, showPivLabels, showR3S3)
 
 // ============================= ALERTAS =============================
 grpAlert = "Alertas"
