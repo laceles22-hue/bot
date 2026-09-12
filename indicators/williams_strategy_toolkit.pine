@@ -11,6 +11,8 @@ vix_bblen         = input.int(20, title="Bandas VIX Periodo", group="Williams VI
 vix_mult_aviso    = input.float(2.0, title="Umbral Aviso (Desviaciones)", group="Williams VIX Fix")
 vix_mult_anomalia = input.float(2.5, title="Umbral Anomalía (Desviaciones)", group="Williams VIX Fix")
 
+show_vix_z_lines  = input.bool(true, title="Mostrar Líneas Umbral VIX Fix (z-score)", group="Williams VIX Fix")
+
 show_range_signal = input.bool(true, title="Señalar Velas de Gran Rango (Breakout)", group="Rango / Volatilidad")
 
 // --- CÁLCULO: WILLIAMS %R ---
@@ -20,10 +22,10 @@ wpr = ta.wpr(wr_len)
 // --- CÁLCULO: WILLIAMS VIX FIX (Suelo de Mercado) ---
 highest_close = ta.highest(close, vix_len)
 wvf = ((highest_close - low) / highest_close) * 100
-vix_basis   = ta.sma(wvf, vix_bblen)
-vix_stdev   = ta.stdev(wvf, vix_bblen)
-vix_upper_aviso    = vix_basis + vix_mult_aviso * vix_stdev
-vix_upper_anomalia = vix_basis + vix_mult_anomalia * vix_stdev
+vix_basis = ta.sma(wvf, vix_bblen)
+vix_stdev = ta.stdev(wvf, vix_bblen)
+// Z-score: cuántas desviaciones estándar se aleja el VIX Fix de su media móvil
+vix_z = vix_stdev == 0 ? 0.0 : (wvf - vix_basis) / vix_stdev
 
 // --- CÁLCULO: RANGO AMPLIO (LARGE RANGE BAR) ---
 atr_val       = ta.atr(14)
@@ -35,9 +37,17 @@ h_ob = hline(wr_ob, "Sobrecompra", color=color.red, linestyle=hline.style_dotted
 h_os = hline(wr_os, "Sobreventa", color=color.green, linestyle=hline.style_dotted)
 fill(h_ob, h_os, color=color.new(color.blue, 90), title="Zona Neutral")
 
+// Líneas de referencia del umbral (estructura ±σ aviso / ±σ anomalía)
+plot(show_vix_z_lines ? vix_z : na, title="VIX Fix (z-score)", color=color.aqua, linewidth=1)
+h_vix_zero        = hline(show_vix_z_lines ? 0.0 : na, "VIX Fix Z 0", color=color.new(color.gray, 50), linestyle=hline.style_solid)
+h_aviso_pos       = hline(show_vix_z_lines ? vix_mult_aviso : na, "+σ Aviso", color=color.teal, linestyle=hline.style_dotted)
+h_aviso_neg       = hline(show_vix_z_lines ? -vix_mult_aviso : na, "−σ Aviso", color=color.teal, linestyle=hline.style_dotted)
+h_anomalia_pos    = hline(show_vix_z_lines ? vix_mult_anomalia : na, "+σ Anomalía", color=color.orange, linestyle=hline.style_dotted)
+h_anomalia_neg    = hline(show_vix_z_lines ? -vix_mult_anomalia : na, "−σ Anomalía", color=color.orange, linestyle=hline.style_dotted)
+
 // Fondo de alerta VIX Fix (Potencial suelo/rebote agresivo)
-is_vix_anomalia = wvf >= vix_upper_anomalia
-is_vix_aviso    = wvf >= vix_upper_aviso and not is_vix_anomalia
+is_vix_anomalia = vix_z >= vix_mult_anomalia
+is_vix_aviso    = vix_z >= vix_mult_aviso and not is_vix_anomalia
 vix_bg_color = is_vix_anomalia ? color.new(color.orange, 70) : is_vix_aviso ? color.new(color.teal, 80) : na
 bgcolor(vix_bg_color, title="VIX Fix Alerta Suelo")
 
