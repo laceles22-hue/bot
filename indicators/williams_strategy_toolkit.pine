@@ -10,6 +10,8 @@ show_vix_z_lines  = input.bool(true, title="Mostrar Líneas Umbral (±σ Aviso /
 
 show_range_signal = input.bool(true, title="Señalar Velas de Gran Rango (Breakout)", group="Rango / Volatilidad")
 
+dark_panel_bg = input.bool(true, title="Fondo Oscuro del Panel", group="Estilo")
+
 // --- CÁLCULO: WILLIAMS VIX FIX (Suelo de Mercado) ---
 highest_close = ta.highest(close, vix_len)
 wvf = ((highest_close - low) / highest_close) * 100
@@ -23,6 +25,9 @@ atr_val       = ta.atr(14)
 is_wide_range = (high - low) > (atr_val * 1.6)
 
 // --- DIBUJO: EL OSCILADOR ES EL HISTOGRAMA VIX FIX ---
+// Fondo oscuro fijo del panel, independiente del tema del gráfico de precio
+bgcolor(dark_panel_bg ? color.new(#131722, 0) : na, title="Fondo Oscuro del Panel")
+
 // El VIX Fix sube cuando el precio CAE con fuerza (miedo/volatilidad bajista) y
 // baja cuando el precio sube tranquilo. Por eso: rojo en zona positiva (caída/miedo),
 // azul en zona negativa (calma/subida) — así el color queda alineado con la dirección real del precio.
