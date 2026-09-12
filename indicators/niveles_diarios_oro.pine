@@ -1,0 +1,462 @@
+//@version=6
+// =====================================================================
+// Niveles Diarios Oro (XAUUSD) — Sesiones, Aperturas y Pivotes
+// ---------------------------------------------------------------------
+// Pensado para el estilo "niveles relevantes del día" que se enseña en
+// muchas academias de trading sobre oro:
+//   - Máx/Mín del día y semana anterior  -> resistencia/soporte "mayor"
+//   - Apertura diaria y semanal
+//   - Rango de la sesión de Asia (Tokio)
+//   - Rango de la sesión de Londres + su apertura ("nivel de Londres")
+//   - Apertura de Nueva York
+//   - Apertura de medianoche NY (00:00 hora de Nueva York, estilo ICT)
+//   - Pivotes clásicos de floor trader (PP, R1-R3, S1-S3), en timeframe
+//     diario, semanal o mensual a elección
+// Todos los niveles se recalculan solos en cada nuevo período; no hace
+// falta arrastrar nada manualmente día a día.
+// =====================================================================
+indicator("Niveles Diarios Oro (XAUUSD)", shorttitle="Niveles Oro", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+// ============================= HELPERS =============================
+lineStyleFromInput(s) =>
+    s == "Sólida" ? line.style_solid : s == "Discontinua" ? line.style_dashed : line.style_dotted
+
+// ============================= APERTURAS Y MÁX/MÍN ANTERIOR =============================
+grpDW = "Día / Semana anterior"
+showDOpen  = input.bool(true, "Apertura diaria", group=grpDW)
+showWOpen  = input.bool(true, "Apertura semanal", group=grpDW)
+showPDHL   = input.bool(true, "Máx/Mín día anterior (Res./Sop. mayor)", group=grpDW)
+showPWHL   = input.bool(true, "Máx/Mín semana anterior", group=grpDW)
+dOpenColor = input.color(color.new(color.gray, 0), "Color apertura diaria", group=grpDW)
+wOpenColor = input.color(color.new(color.purple, 0), "Color apertura semanal", group=grpDW)
+pdhColor   = input.color(color.new(color.red, 0), "Color Máx día anterior", group=grpDW)
+pdlColor   = input.color(color.new(color.blue, 0), "Color Mín día anterior", group=grpDW)
+pwhColor   = input.color(color.new(color.red, 55), "Color Máx semana anterior", group=grpDW)
+pwlColor   = input.color(color.new(color.blue, 55), "Color Mín semana anterior", group=grpDW)
+dwWidth    = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpDW)
+dwStyleIn  = input.string("Discontinua", "Estilo apertura diaria/semanal", options=["Sólida", "Discontinua", "Punteada"], group=grpDW)
+pdhlStyleIn= input.string("Sólida", "Estilo Máx/Mín anterior", options=["Sólida", "Discontinua", "Punteada"], group=grpDW)
+showDWLabels = input.bool(true, "Mostrar etiquetas", group=grpDW)
+
+dwLineStyle   = lineStyleFromInput(dwStyleIn)
+pdhlLineStyle = lineStyleFromInput(pdhlStyleIn)
+
+// Día anterior
+newDayBar = ta.change(time("D")) != 0
+pdHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+pdLow  = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+
+var line  dOpenLine = na
+var label dOpenLbl  = na
+var line  pdhLine = na
+var line  pdlLine = na
+var label pdhLbl  = na
+var label pdlLbl  = na
+
+if newDayBar
+    if showDOpen
+        if not na(dOpenLine)
+            line.delete(dOpenLine)
+        if not na(dOpenLbl)
+            label.delete(dOpenLbl)
+        dOpenLine := line.new(bar_index, open, bar_index, open, color=dOpenColor, width=dwWidth, style=dwLineStyle)
+        if showDWLabels
+            dOpenLbl := label.new(bar_index, open, "Apertura Día", style=label.style_label_left, color=color.new(color.white, 100), textcolor=dOpenColor, size=size.tiny)
+    if showPDHL and not na(pdHigh)
+        if not na(pdhLine)
+            line.delete(pdhLine)
+        if not na(pdlLine)
+            line.delete(pdlLine)
+        if not na(pdhLbl)
+            label.delete(pdhLbl)
+        if not na(pdlLbl)
+            label.delete(pdlLbl)
+        pdhLine := line.new(bar_index, pdHigh, bar_index, pdHigh, color=pdhColor, width=dwWidth, style=pdhlLineStyle)
+        pdlLine := line.new(bar_index, pdLow, bar_index, pdLow, color=pdlColor, width=dwWidth, style=pdhlLineStyle)
+        if showDWLabels
+            pdhLbl := label.new(bar_index, pdHigh, "Res. Mayor (día ant.)", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pdhColor, size=size.tiny)
+            pdlLbl := label.new(bar_index, pdLow, "Sop. Mayor (día ant.)", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pdlColor, size=size.tiny)
+
+if not na(dOpenLine)
+    line.set_x2(dOpenLine, bar_index)
+    if not na(dOpenLbl)
+        label.set_x(dOpenLbl, bar_index)
+if not na(pdhLine)
+    line.set_x2(pdhLine, bar_index)
+    line.set_x2(pdlLine, bar_index)
+    if not na(pdhLbl)
+        label.set_x(pdhLbl, bar_index)
+        label.set_x(pdlLbl, bar_index)
+
+// Semana anterior
+newWeekBar = ta.change(time("W")) != 0
+pwHigh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_off)
+pwLow  = request.security(syminfo.tickerid, "W", low[1], lookahead=barmerge.lookahead_off)
+
+var line  wOpenLine = na
+var label wOpenLbl  = na
+var line  pwhLine = na
+var line  pwlLine = na
+var label pwhLbl  = na
+var label pwlLbl  = na
+
+if newWeekBar
+    if showWOpen
+        if not na(wOpenLine)
+            line.delete(wOpenLine)
+        if not na(wOpenLbl)
+            label.delete(wOpenLbl)
+        wOpenLine := line.new(bar_index, open, bar_index, open, color=wOpenColor, width=dwWidth, style=dwLineStyle)
+        if showDWLabels
+            wOpenLbl := label.new(bar_index, open, "Apertura Semana", style=label.style_label_left, color=color.new(color.white, 100), textcolor=wOpenColor, size=size.tiny)
+    if showPWHL and not na(pwHigh)
+        if not na(pwhLine)
+            line.delete(pwhLine)
+        if not na(pwlLine)
+            line.delete(pwlLine)
+        if not na(pwhLbl)
+            label.delete(pwhLbl)
+        if not na(pwlLbl)
+            label.delete(pwlLbl)
+        pwhLine := line.new(bar_index, pwHigh, bar_index, pwHigh, color=pwhColor, width=dwWidth, style=pdhlLineStyle)
+        pwlLine := line.new(bar_index, pwLow, bar_index, pwLow, color=pwlColor, width=dwWidth, style=pdhlLineStyle)
+        if showDWLabels
+            pwhLbl := label.new(bar_index, pwHigh, "Máx Semana Ant.", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pwhColor, size=size.tiny)
+            pwlLbl := label.new(bar_index, pwLow, "Mín Semana Ant.", style=label.style_label_left, color=color.new(color.white, 100), textcolor=pwlColor, size=size.tiny)
+
+if not na(wOpenLine)
+    line.set_x2(wOpenLine, bar_index)
+    if not na(wOpenLbl)
+        label.set_x(wOpenLbl, bar_index)
+if not na(pwhLine)
+    line.set_x2(pwhLine, bar_index)
+    line.set_x2(pwlLine, bar_index)
+    if not na(pwhLbl)
+        label.set_x(pwhLbl, bar_index)
+        label.set_x(pwlLbl, bar_index)
+
+// ============================= SESIÓN DE ASIA (TOKIO) =============================
+grpAsia = "Sesión de Asia"
+showAsiaHl   = input.bool(true, "Mostrar Alto/Bajo de la sesión de Asia anterior", group=grpAsia)
+asiaSession  = input.session("0000-0900", "Horario sesión Asia (HHMM-HHMM)", group=grpAsia, tooltip="Por defecto: 00:00-09:00 hora de Tokio (aprox. sesión asiática/Tokio).")
+asiaTimezone = "Asia/Tokyo"
+asiaHighColor= input.color(color.new(color.orange, 0), "Color alto sesión Asia", group=grpAsia)
+asiaLowColor = input.color(color.new(color.teal, 0), "Color bajo sesión Asia", group=grpAsia)
+asiaWidth    = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpAsia)
+asiaStyleIn  = input.string("Discontinua", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpAsia)
+showAsiaLabels = input.bool(true, "Mostrar etiquetas", group=grpAsia)
+asiaLineStyle = lineStyleFromInput(asiaStyleIn)
+
+inAsia = not na(time(timeframe.period, asiaSession, asiaTimezone))
+asiaDayId = year(time, asiaTimezone) * 10000 + month(time, asiaTimezone) * 100 + dayofmonth(time, asiaTimezone)
+
+var float runAsiaHigh  = na
+var float runAsiaLow   = na
+var float prevAsiaHigh = na
+var float prevAsiaLow  = na
+var bool  wasInAsia     = false
+var int   lastAsiaDay   = na
+
+// El chequeo de cambio de día calendario (además del propio corte de sesión) evita que,
+// si la sesión no cierra bien por datos overnight, se arrastre el rango de varios días juntos.
+asiaStart = inAsia and (not wasInAsia or asiaDayId != lastAsiaDay)
+asiaEnd   = wasInAsia and not inAsia
+
+if asiaStart
+    runAsiaHigh := high
+    runAsiaLow  := low
+    lastAsiaDay := asiaDayId
+else if inAsia
+    runAsiaHigh := math.max(runAsiaHigh, high)
+    runAsiaLow  := math.min(runAsiaLow, low)
+
+if asiaEnd
+    prevAsiaHigh := runAsiaHigh
+    prevAsiaLow  := runAsiaLow
+
+wasInAsia := inAsia
+
+var line  asiaHLine = na
+var line  asiaLLine = na
+var label asiaHLbl  = na
+var label asiaLLbl  = na
+
+if showAsiaHl and asiaEnd and not na(prevAsiaHigh)
+    if not na(asiaHLine)
+        line.delete(asiaHLine)
+    if not na(asiaLLine)
+        line.delete(asiaLLine)
+    if not na(asiaHLbl)
+        label.delete(asiaHLbl)
+    if not na(asiaLLbl)
+        label.delete(asiaLLbl)
+    asiaHLine := line.new(bar_index, prevAsiaHigh, bar_index, prevAsiaHigh, color=asiaHighColor, width=asiaWidth, style=asiaLineStyle)
+    asiaLLine := line.new(bar_index, prevAsiaLow, bar_index, prevAsiaLow, color=asiaLowColor, width=asiaWidth, style=asiaLineStyle)
+    if showAsiaLabels
+        asiaHLbl := label.new(bar_index, prevAsiaHigh, "Asia H", style=label.style_label_left, color=color.new(color.white, 100), textcolor=asiaHighColor, size=size.tiny)
+        asiaLLbl := label.new(bar_index, prevAsiaLow, "Asia L", style=label.style_label_left, color=color.new(color.white, 100), textcolor=asiaLowColor, size=size.tiny)
+
+if showAsiaHl and not na(asiaHLine)
+    line.set_x2(asiaHLine, bar_index)
+    line.set_x2(asiaLLine, bar_index)
+    if not na(asiaHLbl)
+        label.set_x(asiaHLbl, bar_index)
+        label.set_x(asiaLLbl, bar_index)
+
+// ============================= SESIÓN DE LONDRES ("nivel de Londres") =============================
+grpLdn = "Sesión de Londres"
+showLdnHl    = input.bool(true, "Mostrar Alto/Bajo de la sesión de Londres anterior", group=grpLdn)
+showLdnOpen  = input.bool(true, "Mostrar apertura de Londres", group=grpLdn)
+ldnSession   = input.session("0800-1630", "Horario sesión Londres (HHMM-HHMM)", group=grpLdn, tooltip="Por defecto: horario regular del London Stock Exchange (08:00-16:30 hora de Londres).")
+ldnTimezone  = "Europe/London"
+ldnHighColor = input.color(color.new(color.purple, 0), "Color alto sesión Londres", group=grpLdn)
+ldnLowColor  = input.color(color.new(color.maroon, 0), "Color bajo sesión Londres", group=grpLdn)
+ldnOpenColor = input.color(color.new(color.fuchsia, 0), "Color apertura de Londres", group=grpLdn)
+ldnWidth     = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpLdn)
+ldnStyleIn   = input.string("Discontinua", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpLdn)
+showLdnLabels = input.bool(true, "Mostrar etiquetas", group=grpLdn)
+ldnLineStyle = lineStyleFromInput(ldnStyleIn)
+
+inLdn = not na(time(timeframe.period, ldnSession, ldnTimezone))
+ldnDayId = year(time, ldnTimezone) * 10000 + month(time, ldnTimezone) * 100 + dayofmonth(time, ldnTimezone)
+
+var float runLdnHigh  = na
+var float runLdnLow   = na
+var float prevLdnHigh = na
+var float prevLdnLow  = na
+var bool  wasInLdn     = false
+var int   lastLdnDay   = na
+
+ldnStart = inLdn and (not wasInLdn or ldnDayId != lastLdnDay)
+ldnEnd   = wasInLdn and not inLdn
+
+if ldnStart
+    runLdnHigh := high
+    runLdnLow  := low
+    lastLdnDay := ldnDayId
+else if inLdn
+    runLdnHigh := math.max(runLdnHigh, high)
+    runLdnLow  := math.min(runLdnLow, low)
+
+if ldnEnd
+    prevLdnHigh := runLdnHigh
+    prevLdnLow  := runLdnLow
+
+var float ldnOpenVal = na
+var line  ldnOpenLine = na
+var label ldnOpenLbl  = na
+
+if ldnStart
+    ldnOpenVal := open
+    if showLdnOpen
+        if not na(ldnOpenLine)
+            line.delete(ldnOpenLine)
+        if not na(ldnOpenLbl)
+            label.delete(ldnOpenLbl)
+        ldnOpenLine := line.new(bar_index, ldnOpenVal, bar_index, ldnOpenVal, color=ldnOpenColor, width=ldnWidth, style=ldnLineStyle)
+        if showLdnLabels
+            ldnOpenLbl := label.new(bar_index, ldnOpenVal, "Apertura Londres", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnOpenColor, size=size.tiny)
+
+if showLdnOpen and not na(ldnOpenLine)
+    line.set_x2(ldnOpenLine, bar_index)
+    if not na(ldnOpenLbl)
+        label.set_x(ldnOpenLbl, bar_index)
+
+wasInLdn := inLdn
+
+var line  ldnHLine = na
+var line  ldnLLine = na
+var label ldnHLbl  = na
+var label ldnLLbl  = na
+
+if showLdnHl and ldnEnd and not na(prevLdnHigh)
+    if not na(ldnHLine)
+        line.delete(ldnHLine)
+    if not na(ldnLLine)
+        line.delete(ldnLLine)
+    if not na(ldnHLbl)
+        label.delete(ldnHLbl)
+    if not na(ldnLLbl)
+        label.delete(ldnLLbl)
+    ldnHLine := line.new(bar_index, prevLdnHigh, bar_index, prevLdnHigh, color=ldnHighColor, width=ldnWidth, style=ldnLineStyle)
+    ldnLLine := line.new(bar_index, prevLdnLow, bar_index, prevLdnLow, color=ldnLowColor, width=ldnWidth, style=ldnLineStyle)
+    if showLdnLabels
+        ldnHLbl := label.new(bar_index, prevLdnHigh, "Londres H", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnHighColor, size=size.tiny)
+        ldnLLbl := label.new(bar_index, prevLdnLow, "Londres L", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ldnLowColor, size=size.tiny)
+
+if showLdnHl and not na(ldnHLine)
+    line.set_x2(ldnHLine, bar_index)
+    line.set_x2(ldnLLine, bar_index)
+    if not na(ldnHLbl)
+        label.set_x(ldnHLbl, bar_index)
+        label.set_x(ldnLLbl, bar_index)
+
+// ============================= APERTURA NUEVA YORK Y MEDIANOCHE (ICT) =============================
+grpNY = "Nueva York"
+showNYOpen  = input.bool(true, "Mostrar apertura de Nueva York (sesión regular)", group=grpNY)
+nySession   = input.session("0930-1600", "Horario sesión NY (HHMM-HHMM)", group=grpNY, tooltip="Por defecto: horario regular del mercado de EE.UU. (09:30-16:00 hora de Nueva York).")
+nyTimezone  = "America/New_York"
+nyOpenColor = input.color(color.new(color.lime, 0), "Color apertura NY", group=grpNY)
+showMidnight    = input.bool(true, "Mostrar apertura medianoche NY (00:00, estilo ICT)", group=grpNY)
+midnightColor   = input.color(color.new(color.yellow, 0), "Color apertura medianoche", group=grpNY)
+nyWidth     = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpNY)
+nyStyleIn   = input.string("Punteada", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpNY)
+showNYLabels = input.bool(true, "Mostrar etiquetas", group=grpNY)
+nyLineStyle = lineStyleFromInput(nyStyleIn)
+
+inNY = not na(time(timeframe.period, nySession, nyTimezone))
+nyStart = inNY and not inNY[1]
+
+var line  nyOpenLine = na
+var label nyOpenLbl  = na
+
+if nyStart
+    if showNYOpen
+        if not na(nyOpenLine)
+            line.delete(nyOpenLine)
+        if not na(nyOpenLbl)
+            label.delete(nyOpenLbl)
+        nyOpenLine := line.new(bar_index, open, bar_index, open, color=nyOpenColor, width=nyWidth, style=nyLineStyle)
+        if showNYLabels
+            nyOpenLbl := label.new(bar_index, open, "Apertura NY", style=label.style_label_left, color=color.new(color.white, 100), textcolor=nyOpenColor, size=size.tiny)
+
+if showNYOpen and not na(nyOpenLine)
+    line.set_x2(nyOpenLine, bar_index)
+    if not na(nyOpenLbl)
+        label.set_x(nyOpenLbl, bar_index)
+
+midnightBar = ta.change(time("D", nyTimezone)) != 0
+
+var line  midnightLine = na
+var label midnightLbl  = na
+
+if midnightBar
+    if showMidnight
+        if not na(midnightLine)
+            line.delete(midnightLine)
+        if not na(midnightLbl)
+            label.delete(midnightLbl)
+        midnightLine := line.new(bar_index, open, bar_index, open, color=midnightColor, width=nyWidth, style=nyLineStyle)
+        if showNYLabels
+            midnightLbl := label.new(bar_index, open, "Medianoche NY", style=label.style_label_left, color=color.new(color.white, 100), textcolor=midnightColor, size=size.tiny)
+
+if showMidnight and not na(midnightLine)
+    line.set_x2(midnightLine, bar_index)
+    if not na(midnightLbl)
+        label.set_x(midnightLbl, bar_index)
+
+// ============================= PIVOTES CLÁSICOS (FLOOR TRADER) =============================
+grpPiv = "Pivotes"
+showPivots  = input.bool(true, "Mostrar pivotes clásicos", group=grpPiv)
+pivotTfIn   = input.string("Diario", "Timeframe de los pivotes", options=["Diario", "Semanal", "Mensual"], group=grpPiv)
+showR3S3    = input.bool(true, "Mostrar R3/S3", group=grpPiv)
+ppColor = input.color(color.new(color.gray, 0), "Color PP (pivote central)", group=grpPiv)
+rColor  = input.color(color.new(color.red, 0), "Color resistencias (R1-R3)", group=grpPiv)
+sColor  = input.color(color.new(color.green, 0), "Color soportes (S1-S3)", group=grpPiv)
+pivWidth   = input.int(1, "Grosor de línea", minval=1, maxval=4, group=grpPiv)
+pivStyleIn = input.string("Sólida", "Estilo de línea", options=["Sólida", "Discontinua", "Punteada"], group=grpPiv)
+showPivLabels = input.bool(true, "Mostrar etiquetas", group=grpPiv)
+pivLineStyle = lineStyleFromInput(pivStyleIn)
+
+pivotTf = pivotTfIn == "Semanal" ? "W" : pivotTfIn == "Mensual" ? "M" : "D"
+
+[pivH, pivL, pivC] = request.security(syminfo.tickerid, pivotTf, [high[1], low[1], close[1]], lookahead=barmerge.lookahead_off)
+newPivotBar = ta.change(time(pivotTf)) != 0
+
+pp = (pivH + pivL + pivC) / 3
+r1 = 2 * pp - pivL
+s1 = 2 * pp - pivH
+r2 = pp + (pivH - pivL)
+s2 = pp - (pivH - pivL)
+r3 = pivH + 2 * (pp - pivL)
+s3 = pivL - 2 * (pivH - pp)
+
+var line  ppLine = na
+var line  r1Line = na
+var line  r2Line = na
+var line  r3Line = na
+var line  s1Line = na
+var line  s2Line = na
+var line  s3Line = na
+var label ppLbl = na
+var label r1Lbl = na
+var label r2Lbl = na
+var label r3Lbl = na
+var label s1Lbl = na
+var label s2Lbl = na
+var label s3Lbl = na
+
+f_delLine(id) =>
+    if not na(id)
+        line.delete(id)
+f_delLbl(id) =>
+    if not na(id)
+        label.delete(id)
+
+if showPivots and newPivotBar and not na(pp)
+    f_delLine(ppLine)
+    f_delLine(r1Line)
+    f_delLine(r2Line)
+    f_delLine(r3Line)
+    f_delLine(s1Line)
+    f_delLine(s2Line)
+    f_delLine(s3Line)
+    f_delLbl(ppLbl)
+    f_delLbl(r1Lbl)
+    f_delLbl(r2Lbl)
+    f_delLbl(r3Lbl)
+    f_delLbl(s1Lbl)
+    f_delLbl(s2Lbl)
+    f_delLbl(s3Lbl)
+
+    ppLine := line.new(bar_index, pp, bar_index, pp, color=ppColor, width=pivWidth, style=pivLineStyle)
+    r1Line := line.new(bar_index, r1, bar_index, r1, color=color.new(rColor, 40), width=pivWidth, style=pivLineStyle)
+    r2Line := line.new(bar_index, r2, bar_index, r2, color=color.new(rColor, 20), width=pivWidth, style=pivLineStyle)
+    s1Line := line.new(bar_index, s1, bar_index, s1, color=color.new(sColor, 40), width=pivWidth, style=pivLineStyle)
+    s2Line := line.new(bar_index, s2, bar_index, s2, color=color.new(sColor, 20), width=pivWidth, style=pivLineStyle)
+    if showR3S3
+        r3Line := line.new(bar_index, r3, bar_index, r3, color=color.new(rColor, 0), width=pivWidth, style=pivLineStyle)
+        s3Line := line.new(bar_index, s3, bar_index, s3, color=color.new(sColor, 0), width=pivWidth, style=pivLineStyle)
+
+    if showPivLabels
+        ppLbl := label.new(bar_index, pp, "PP", style=label.style_label_left, color=color.new(color.white, 100), textcolor=ppColor, size=size.tiny)
+        r1Lbl := label.new(bar_index, r1, "R1", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
+        r2Lbl := label.new(bar_index, r2, "R2", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
+        s1Lbl := label.new(bar_index, s1, "S1", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
+        s2Lbl := label.new(bar_index, s2, "S2", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
+        if showR3S3
+            r3Lbl := label.new(bar_index, r3, "R3", style=label.style_label_left, color=color.new(color.white, 100), textcolor=rColor, size=size.tiny)
+            s3Lbl := label.new(bar_index, s3, "S3", style=label.style_label_left, color=color.new(color.white, 100), textcolor=sColor, size=size.tiny)
+
+if showPivots and not na(ppLine)
+    line.set_x2(ppLine, bar_index)
+    line.set_x2(r1Line, bar_index)
+    line.set_x2(r2Line, bar_index)
+    line.set_x2(s1Line, bar_index)
+    line.set_x2(s2Line, bar_index)
+    if not na(ppLbl)
+        label.set_x(ppLbl, bar_index)
+        label.set_x(r1Lbl, bar_index)
+        label.set_x(r2Lbl, bar_index)
+        label.set_x(s1Lbl, bar_index)
+        label.set_x(s2Lbl, bar_index)
+    if showR3S3 and not na(r3Line)
+        line.set_x2(r3Line, bar_index)
+        line.set_x2(s3Line, bar_index)
+        if not na(r3Lbl)
+            label.set_x(r3Lbl, bar_index)
+            label.set_x(s3Lbl, bar_index)
+
+// ============================= ALERTAS =============================
+grpAlert = "Alertas"
+alertPDH = input.bool(false, "Alertar ruptura de Res. Mayor (día anterior)", group=grpAlert)
+alertPDL = input.bool(false, "Alertar ruptura de Sop. Mayor (día anterior)", group=grpAlert)
+alertPivPP = input.bool(false, "Alertar cruce del Pivote Central (PP)", group=grpAlert)
+alertLdnH = input.bool(false, "Alertar ruptura del Máx de Londres", group=grpAlert)
+alertLdnL = input.bool(false, "Alertar ruptura del Mín de Londres", group=grpAlert)
+
+alertcondition(alertPDH and not na(pdHigh) and ta.crossover(close, pdHigh), title="Ruptura Res. Mayor (día ant.)", message="{{ticker}}: cierre por encima del máximo del día anterior")
+alertcondition(alertPDL and not na(pdLow) and ta.crossunder(close, pdLow), title="Ruptura Sop. Mayor (día ant.)", message="{{ticker}}: cierre por debajo del mínimo del día anterior")
+alertcondition(alertPivPP and not na(pp) and ta.cross(close, pp), title="Cruce del Pivote Central", message="{{ticker}}: cruce del pivote central (PP)")
+alertcondition(alertLdnH and not na(prevLdnHigh) and ta.crossover(close, prevLdnHigh), title="Ruptura Máx Londres", message="{{ticker}}: cierre por encima del máximo de la sesión de Londres")
+alertcondition(alertLdnL and not na(prevLdnLow) and ta.crossunder(close, prevLdnLow), title="Ruptura Mín Londres", message="{{ticker}}: cierre por debajo del mínimo de la sesión de Londres")
