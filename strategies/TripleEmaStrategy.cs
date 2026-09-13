@@ -63,6 +63,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 				TrendPeriod									= 200;
 				ProfitTargetTicks							= 50;
 				StopLossTicks								= 32;
+				StartTime									= 093000;
+				EndTime										= 160000;
 			}
 			else if (State == State.Configure)
 			{
@@ -96,6 +98,10 @@ namespace NinjaTrader.NinjaScript.Strategies
 			if (BarsInProgress != 0)
 				return;
 
+			// Only look for new entries inside the configured trading window
+			if (!IsInTradingHours())
+				return;
+
 			bool fastAboveTrend		= fastEma[0] > trendEma[0];
 			bool slowAboveTrend		= slowEma[0] > trendEma[0];
 			bool fastBelowTrend		= fastEma[0] < trendEma[0];
@@ -112,6 +118,22 @@ namespace NinjaTrader.NinjaScript.Strategies
 			{
 				EnterShort("ShortEntry");
 			}
+		}
+
+		/// <summary>
+		/// Returns true when the current bar's time falls inside [StartTime, EndTime].
+		/// Both are HHMMSS integers (e.g. 093000 = 9:30:00, 160000 = 16:00:00).
+		/// Supports overnight windows where EndTime is earlier than StartTime
+		/// (e.g. StartTime = 220000, EndTime = 060000).
+		/// </summary>
+		private bool IsInTradingHours()
+		{
+			int currentTime = ToTime(Time[0]);
+
+			if (StartTime <= EndTime)
+				return currentTime >= StartTime && currentTime <= EndTime;
+
+			return currentTime >= StartTime || currentTime <= EndTime;
 		}
 
 		#region Properties
@@ -144,6 +166,18 @@ namespace NinjaTrader.NinjaScript.Strategies
 		[Range(1, int.MaxValue)]
 		[Display(Name = "Stop Loss (Ticks)", Description = "Stop loss in ticks", Order = 2, GroupName = "Risk Management")]
 		public int StopLossTicks
+		{ get; set; }
+
+		[NinjaScriptProperty]
+		[Range(0, 235959)]
+		[Display(Name = "Start Time (HHMMSS)", Description = "Start of the trading window, e.g. 093000 for 9:30:00", Order = 1, GroupName = "Session Hours")]
+		public int StartTime
+		{ get; set; }
+
+		[NinjaScriptProperty]
+		[Range(0, 235959)]
+		[Display(Name = "End Time (HHMMSS)", Description = "End of the trading window, e.g. 160000 for 16:00:00", Order = 2, GroupName = "Session Hours")]
+		public int EndTime
 		{ get; set; }
 
 		#endregion
