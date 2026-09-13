@@ -63,8 +63,9 @@ namespace NinjaTrader.NinjaScript.Strategies
 				TrendPeriod									= 200;
 				ProfitTargetTicks							= 50;
 				StopLossTicks								= 32;
-				StartTime									= 093000;
-				EndTime										= 160000;
+				UseTradingHours								= true;
+				StartTime									= DateTime.Parse("09:30", System.Globalization.CultureInfo.InvariantCulture);
+				EndTime										= DateTime.Parse("16:00", System.Globalization.CultureInfo.InvariantCulture);
 			}
 			else if (State == State.Configure)
 			{
@@ -122,18 +123,24 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 		/// <summary>
 		/// Returns true when the current bar's time falls inside [StartTime, EndTime].
-		/// Both are HHMMSS integers (e.g. 093000 = 9:30:00, 160000 = 16:00:00).
-		/// Supports overnight windows where EndTime is earlier than StartTime
-		/// (e.g. StartTime = 220000, EndTime = 060000).
+		/// Only the hour/minute portion of StartTime/EndTime is used (they are
+		/// edited as time-of-day pickers in the UI). Supports overnight windows
+		/// where EndTime is earlier than StartTime (e.g. 22:00 -> 06:00).
+		/// Returns true unconditionally when UseTradingHours is disabled.
 		/// </summary>
 		private bool IsInTradingHours()
 		{
-			int currentTime = ToTime(Time[0]);
+			if (!UseTradingHours)
+				return true;
 
-			if (StartTime <= EndTime)
-				return currentTime >= StartTime && currentTime <= EndTime;
+			int currentTime	= ToTime(Time[0]);
+			int startTime		= StartTime.Hour * 10000 + StartTime.Minute * 100;
+			int endTime			= EndTime.Hour * 10000 + EndTime.Minute * 100;
 
-			return currentTime >= StartTime || currentTime <= EndTime;
+			if (startTime <= endTime)
+				return currentTime >= startTime && currentTime <= endTime;
+
+			return currentTime >= startTime || currentTime <= endTime;
 		}
 
 		#region Properties
@@ -169,15 +176,20 @@ namespace NinjaTrader.NinjaScript.Strategies
 		{ get; set; }
 
 		[NinjaScriptProperty]
-		[Range(0, 235959)]
-		[Display(Name = "Start Time (HHMMSS)", Description = "Start of the trading window, e.g. 093000 for 9:30:00", Order = 1, GroupName = "Session Hours")]
-		public int StartTime
+		[Display(Name = "Enable Trading Hours", Description = "When checked, entries are only taken between Start Time and End Time", Order = 1, GroupName = "Session Hours")]
+		public bool UseTradingHours
 		{ get; set; }
 
 		[NinjaScriptProperty]
-		[Range(0, 235959)]
-		[Display(Name = "End Time (HHMMSS)", Description = "End of the trading window, e.g. 160000 for 16:00:00", Order = 2, GroupName = "Session Hours")]
-		public int EndTime
+		[PropertyEditor("NinjaTrader.Gui.Tools.TimeEditorKey")]
+		[Display(Name = "Start Time", Description = "Start of the trading window", Order = 2, GroupName = "Session Hours")]
+		public DateTime StartTime
+		{ get; set; }
+
+		[NinjaScriptProperty]
+		[PropertyEditor("NinjaTrader.Gui.Tools.TimeEditorKey")]
+		[Display(Name = "End Time", Description = "End of the trading window (can be earlier than Start Time for an overnight window)", Order = 3, GroupName = "Session Hours")]
+		public DateTime EndTime
 		{ get; set; }
 
 		#endregion
