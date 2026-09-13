@@ -26,7 +26,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 	/// trend EMA. Risk is managed with fixed profit target and stop loss
 	/// expressed in ticks.
 	/// </summary>
-	public class TripleEmaStrategy : Strategy
+	public class Lagarta : Strategy
 	{
 		private EMA fastEma;
 		private EMA slowEma;
@@ -37,7 +37,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 			if (State == State.SetDefaults)
 			{
 				Description									= @"Triple EMA (fast/slow/trend) crossover strategy with tick-based profit target and stop loss.";
-				Name										= "TripleEmaStrategy";
+				Name										= "Lagarta";
 				Calculate									= Calculate.OnBarClose;
 				EntriesPerDirection							= 1;
 				EntryHandling								= EntryHandling.AllEntries;
