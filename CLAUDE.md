@@ -4,38 +4,33 @@ This file gives Claude Code (and other AI assistants) guidance for working in th
 
 ## Repository status
 
-As of 2026-08-15, **this repository is empty** — it has no commits, no source files, and no
-configuration (no `package.json`, `pyproject.toml`, `go.mod`, etc.). There is currently no
-codebase, build system, test suite, or established convention to document.
+This repo holds a couple of unrelated small projects — there is no single build system or
+language for the whole tree. Treat each top-level directory independently.
 
-This file is a placeholder. Regenerate/expand it once real code lands — see "Keeping this file
-up to date" below.
+## Codebase structure
 
-## What to do until real code exists
+- `indicators/` — Pine Script (TradingView) indicators.
+  - `fvg_ifvg.pine` — Fair Value Gap / Inverse Fair Value Gap overlay indicator (Pine Script v6).
+    No build step; paste the file into TradingView's Pine Editor to use it.
+- `web/` — Static website for **Urban Beauty**, a hair salon in Granollers (Barcelona).
+  - `index.html` — single-page site (hero, servicios, sobre nosotros, horario, contacto/mapa).
+  - `css/style.css` — all styling, mobile-responsive (breakpoints at 900px and 520px).
+  - `js/main.js` — mobile nav toggle, scroll-reveal animations, footer year.
+  - No build step or dependencies. Open `web/index.html` directly, or serve the folder with
+    any static file server, e.g. `python3 -m http.server 8000` from inside `web/`.
+  - Business details baked into the markup: address (Calle Josep Umbert, Granollers), phone
+    (938 79 31 75 / +34938793175), and a Google Maps embed for that address. Opening hours in
+    the "Horario" section are a placeholder — confirm/update them with the real schedule.
+  - No real photos yet — the gallery/visual areas use icons and color only. Swap in real
+    photos when available.
 
-- Don't assume a language, framework, or project layout that hasn't been established yet.
-- If asked to scaffold a new project here, confirm with the user what kind of project `bot` is
-  meant to be (e.g. a Slack/Discord bot, a CLI tool, a web service) before generating files,
-  since the repo name alone doesn't specify this.
-- Once the first real commit(s) land, update every section below from what's actually in the
-  tree — do not leave speculative content in place.
+## Conventions
 
-## Sections to fill in once code exists
-
-Replace this section with the real details as soon as there's something to describe:
-
-- **Codebase structure** — top-level directories/packages and what each contains.
-- **Development workflow** — how to install dependencies, run the project locally, run the test
-  suite, and lint/format the code (exact commands, not generic advice).
-- **Architecture notes** — key modules, entry points, data flow, and any non-obvious design
-  decisions worth preserving.
-- **Conventions** — naming, file organization, commit/PR style, and anything else contributors
-  (human or AI) should follow consistently.
-- **Branching / CI** — default branch name, required checks, and how PRs get merged.
+- Keep `web/` dependency-free and framework-free (plain HTML/CSS/JS) unless the user asks for
+  a framework.
+- Spanish is the working language for all user-facing copy in `web/`.
 
 ## Keeping this file up to date
 
-When you add the first meaningful code to this repository, regenerate this file (the `init`
-Claude Code skill does this automatically by scanning the repo) rather than editing this
-placeholder piecemeal. Keep CLAUDE.md in sync with the codebase going forward — update it
-whenever structure, workflows, or conventions change materially.
+Update this file whenever structure, workflows, or conventions change materially — e.g. if a
+build tool, framework, or additional project is introduced.
