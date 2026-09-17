@@ -1,0 +1,380 @@
+//@version=6
+// =====================================================================
+// Setup Grade | ICT Checklist
+// ---------------------------------------------------------------------
+// Panel de calificación de setup al estilo "Setup Grade" con 6 checks:
+//   1. Liquidity Sweep   -> barrida de un máximo/mínimo relevante (pivote)
+//                           con cierre de vuelta dentro del rango.
+//   2. HTF PDA Delivery  -> el precio está operando dentro de un Fair
+//                           Value Gap formado en un timeframe superior.
+//   3. Delta Imbalance   -> desequilibrio de volumen comprador/vendedor
+//                           aproximado a partir de velas de un timeframe
+//                           inferior (Pine no expone delta real de book).
+//   4. IFVG              -> hay al menos una Inverse Fair Value Gap
+//                           activa (FVG que fue invalidada y se invirtió).
+//   5. Clear Targets     -> existe liquidez objetivo (pivote opuesto) a
+//                           una distancia mínima (x ATR) del precio.
+//   6. SMT w/ E3         -> divergencia de Smart Money contra dos activos
+//                           correlacionados configurables (E2 y E3).
+//
+// Cada check suma 1 punto (máx. 6). La nota se muestra en el panel junto
+// al símbolo y precio actual, y opcionalmente se dibuja un plan de trade
+// (entrada/SL/TP) con el tamaño de posición calculado según el riesgo.
+//
+// LIMITACIONES / SUPUESTOS (ajustar a gusto vía inputs):
+//  - "Delta" es una aproximación con velas del timeframe inferior
+//    (compra si close>open, venta si close<open), no order flow real.
+//  - Las llamadas request.security() sobre la vela HTF/LTF en formación
+//    pueden repintar hasta que esa vela cierra; es el comportamiento
+//    estándar de Pine y no afecta a las velas ya cerradas.
+//  - SMT compara pivotes de igual longitud en el mismo timeframe del
+//    gráfico contra dos símbolos correlacionados definidos por el usuario.
+// =====================================================================
+indicator("Setup Grade | ICT Checklist", shorttitle="Setup Grade", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ============================= INPUTS: FVG / IFVG =============================
+grpFvg = "Fair Value Gap (FVG)"
+showBullFvg   = input.bool(true, "Mostrar FVG alcistas", group=grpFvg)
+showBearFvg   = input.bool(true, "Mostrar FVG bajistas", group=grpFvg)
+bullFvgBg     = input.color(color.new(color.teal, 80), "Relleno FVG alcista", group=grpFvg)
+bearFvgBg     = input.color(color.new(color.red, 80), "Relleno FVG bajista", group=grpFvg)
+bullFvgBorder = input.color(color.new(color.teal, 0), "Borde FVG alcista", group=grpFvg)
+bearFvgBorder = input.color(color.new(color.red, 0), "Borde FVG bajista", group=grpFvg)
+minGapAtrMult = input.float(0.0, "Tamaño mínimo del gap (x ATR)", minval=0.0, step=0.05, group=grpFvg)
+atrLen        = input.int(14, "Periodo ATR", minval=1, group=grpFvg)
+maxZonesPerSide = input.int(20, "Máx. zonas activas por tipo", minval=1, maxval=100, group=grpFvg)
+
+grpIfvg = "Inverse Fair Value Gap (IFVG)"
+showIfvg       = input.bool(true, "Mostrar IFVG", group=grpIfvg)
+bullIfvgBg     = input.color(color.new(color.lime, 80), "Relleno IFVG alcista", group=grpIfvg)
+bearIfvgBg     = input.color(color.new(color.fuchsia, 80), "Relleno IFVG bajista", group=grpIfvg)
+bullIfvgBorder = input.color(color.new(color.lime, 0), "Borde IFVG alcista", group=grpIfvg)
+bearIfvgBorder = input.color(color.new(color.fuchsia, 0), "Borde IFVG bajista", group=grpIfvg)
+
+// ============================= INPUTS: LIQUIDITY SWEEP / TARGETS =============================
+grpSweep = "Liquidity Sweep / Clear Targets"
+swingLen        = input.int(5, "Longitud de pivote", minval=1, group=grpSweep)
+sweepValidBars  = input.int(30, "Vigencia del sweep (barras)", minval=1, group=grpSweep)
+minTargetAtrMult = input.float(1.0, "Distancia mínima al target (x ATR)", minval=0.1, step=0.1, group=grpSweep)
+
+// ============================= INPUTS: HTF PDA DELIVERY =============================
+grpHtf = "HTF PDA Delivery"
+htfTf = input.timeframe("60", "Timeframe superior (HTF)", group=grpHtf)
+
+// ============================= INPUTS: DELTA IMBALANCE =============================
+grpDelta = "Delta Imbalance"
+deltaLtf       = input.timeframe("1", "Timeframe inferior para delta", group=grpDelta)
+deltaLookback  = input.int(20, "Barras para delta medio", minval=5, group=grpDelta)
+deltaThreshold = input.float(1.5, "Umbral de imbalance (x delta medio)", minval=0.1, step=0.1, group=grpDelta)
+
+// ============================= INPUTS: SMT =============================
+grpSmt = "SMT Divergence (E2 / E3)"
+smtSymbol2 = input.symbol("CME_MINI:ES1!", "Símbolo correlacionado E2", group=grpSmt)
+smtSymbol3 = input.symbol("CME_MINI:YM1!", "Símbolo correlacionado E3", group=grpSmt)
+
+// ============================= INPUTS: RISK / TRADE PLAN =============================
+grpRisk = "Plan de trade / Tamaño de posición"
+showTradePlan   = input.bool(true, "Dibujar plan de trade (Entrada/SL/TP)", group=grpRisk)
+minGradeForPlan = input.int(4, "Mínimo de checks para dibujar el plan", minval=1, maxval=6, group=grpRisk)
+accountSize     = input.float(10000, "Tamaño de cuenta ($)", minval=0, group=grpRisk)
+riskPercent     = input.float(1.0, "Riesgo por operación (%)", minval=0.01, step=0.1, group=grpRisk)
+slBufferAtrMult = input.float(0.1, "Buffer de SL (x ATR)", minval=0, step=0.05, group=grpRisk)
+planBarsExtend  = input.int(40, "Extender plan (barras)", minval=5, group=grpRisk)
+
+// ============================= INPUTS: PANEL =============================
+grpPanel = "Panel Setup Grade"
+showPanel      = input.bool(true, "Mostrar panel", group=grpPanel)
+panelPosition  = input.string("Arriba Derecha", "Posición", options=["Arriba Derecha", "Arriba Izquierda", "Abajo Derecha", "Abajo Izquierda"], group=grpPanel)
+panelTextSize  = input.string("Normal", "Tamaño de texto", options=["Pequeño", "Normal", "Grande"], group=grpPanel)
+
+tsize = panelTextSize == "Pequeño" ? size.small : panelTextSize == "Grande" ? size.large : size.normal
+tablePos = panelPosition == "Arriba Derecha" ? position.top_right : panelPosition == "Arriba Izquierda" ? position.top_left : panelPosition == "Abajo Derecha" ? position.bottom_right : position.bottom_left
+
+// ============================= TIPOS =============================
+type Zone
+    box   b
+    float top
+    float bottom
+
+var array<Zone> bullFvgZones  = array.new<Zone>()
+var array<Zone> bearFvgZones  = array.new<Zone>()
+var array<Zone> bullIfvgZones = array.new<Zone>()
+var array<Zone> bearIfvgZones = array.new<Zone>()
+
+// ============================= HELPERS =============================
+atrVal = ta.atr(atrLen)
+
+closedThrough(bottomEdge, topEdge, isBullZone) =>
+    isBullZone ? close < bottomEdge : close > topEdge
+
+pushZone(arr, z) =>
+    array.push(arr, z)
+    if array.size(arr) > maxZonesPerSide
+        old = array.shift(arr)
+        box.delete(old.b)
+
+// ============================= 1) FVG (patrón de 3 velas) + IFVG =============================
+bullGapUp = low > high[2]
+bearGapDn = high < low[2]
+
+bullTop = low
+bullBot = high[2]
+bearTop = low[2]
+bearBot = high
+
+bullSizeOk = minGapAtrMult <= 0 or (bullTop - bullBot) >= atrVal * minGapAtrMult
+bearSizeOk = minGapAtrMult <= 0 or (bearTop - bearBot) >= atrVal * minGapAtrMult
+
+newBullFvg = showBullFvg and bullGapUp and bullSizeOk
+newBearFvg = showBearFvg and bearGapDn and bearSizeOk
+
+if newBullFvg
+    b = box.new(bar_index - 2, bullTop, bar_index, bullBot, border_color=bullFvgBorder, border_width=1, bgcolor=bullFvgBg)
+    pushZone(bullFvgZones, Zone.new(b, bullTop, bullBot))
+
+if newBearFvg
+    b = box.new(bar_index - 2, bearTop, bar_index, bearBot, border_color=bearFvgBorder, border_width=1, bgcolor=bearFvgBg)
+    pushZone(bearFvgZones, Zone.new(b, bearTop, bearBot))
+
+if array.size(bullFvgZones) > 0
+    for i = array.size(bullFvgZones) - 1 to 0
+        z = array.get(bullFvgZones, i)
+        box.set_right(z.b, bar_index)
+        if closedThrough(z.bottom, z.top, true)
+            array.remove(bullFvgZones, i)
+            box.delete(z.b)
+            if showIfvg
+                nb = box.new(bar_index, z.top, bar_index, z.bottom, border_color=bearIfvgBorder, border_width=1, bgcolor=bearIfvgBg)
+                pushZone(bearIfvgZones, Zone.new(nb, z.top, z.bottom))
+
+if array.size(bearFvgZones) > 0
+    for i = array.size(bearFvgZones) - 1 to 0
+        z = array.get(bearFvgZones, i)
+        box.set_right(z.b, bar_index)
+        if closedThrough(z.bottom, z.top, false)
+            array.remove(bearFvgZones, i)
+            box.delete(z.b)
+            if showIfvg
+                nb = box.new(bar_index, z.top, bar_index, z.bottom, border_color=bullIfvgBorder, border_width=1, bgcolor=bullIfvgBg)
+                pushZone(bullIfvgZones, Zone.new(nb, z.top, z.bottom))
+
+if array.size(bullIfvgZones) > 0
+    for i = array.size(bullIfvgZones) - 1 to 0
+        z = array.get(bullIfvgZones, i)
+        box.set_right(z.b, bar_index)
+        if closedThrough(z.bottom, z.top, true)
+            array.remove(bullIfvgZones, i)
+            box.delete(z.b)
+
+if array.size(bearIfvgZones) > 0
+    for i = array.size(bearIfvgZones) - 1 to 0
+        z = array.get(bearIfvgZones, i)
+        box.set_right(z.b, bar_index)
+        if closedThrough(z.bottom, z.top, false)
+            array.remove(bearIfvgZones, i)
+            box.delete(z.b)
+
+ifvgOk = array.size(bullIfvgZones) > 0 or array.size(bearIfvgZones) > 0
+
+// ============================= 2) LIQUIDITY SWEEP + CLEAR TARGETS =============================
+swingPH = ta.pivothigh(high, swingLen, swingLen)
+swingPL = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastPivotHigh = na
+var float lastPivotLow  = na
+
+if not na(swingPH)
+    lastPivotHigh := swingPH
+if not na(swingPL)
+    lastPivotLow := swingPL
+
+bullSweep = not na(lastPivotLow) and low < lastPivotLow and close > lastPivotLow
+bearSweep = not na(lastPivotHigh) and high > lastPivotHigh and close < lastPivotHigh
+
+var bool  bullSweepActive = false
+var bool  bearSweepActive = false
+var int   bullSweepBar    = na
+var int   bearSweepBar    = na
+var float bullSweepLow    = na
+var float bearSweepHigh   = na
+
+if bullSweep
+    bullSweepActive := true
+    bullSweepBar := bar_index
+    bullSweepLow := low
+if bearSweep
+    bearSweepActive := true
+    bearSweepBar := bar_index
+    bearSweepHigh := high
+
+if bullSweepActive and (bar_index - bullSweepBar > sweepValidBars)
+    bullSweepActive := false
+if bearSweepActive and (bar_index - bearSweepBar > sweepValidBars)
+    bearSweepActive := false
+
+liquiditySweepOk = bullSweepActive or bearSweepActive
+
+targetDistBull = not na(lastPivotHigh) ? lastPivotHigh - close : na
+targetDistBear = not na(lastPivotLow) ? close - lastPivotLow : na
+
+clearTargetsOk = (bullSweepActive and not na(targetDistBull) and targetDistBull > atrVal * minTargetAtrMult) or (bearSweepActive and not na(targetDistBear) and targetDistBear > atrVal * minTargetAtrMult) or (not bullSweepActive and not bearSweepActive and ((not na(targetDistBull) and targetDistBull > atrVal * minTargetAtrMult) or (not na(targetDistBear) and targetDistBear > atrVal * minTargetAtrMult)))
+
+// ============================= 3) HTF PDA DELIVERY =============================
+[htfHigh0, htfHigh2, htfLow0, htfLow2] = request.security(syminfo.tickerid, htfTf, [high, high[2], low, low[2]], lookahead=barmerge.lookahead_off)
+
+htfBullFvgNow = htfLow0 > htfHigh2
+htfBearFvgNow = htfHigh0 < htfLow2
+
+var float htfBullTop = na
+var float htfBullBot = na
+var float htfBearTop = na
+var float htfBearBot = na
+
+if htfBullFvgNow
+    htfBullTop := htfLow0
+    htfBullBot := htfHigh2
+if htfBearFvgNow
+    htfBearTop := htfLow2
+    htfBearBot := htfHigh0
+
+htfPdaDelivered = (not na(htfBullTop) and close <= htfBullTop and close >= htfBullBot) or (not na(htfBearTop) and close <= htfBearTop and close >= htfBearBot)
+
+// ============================= 4) DELTA IMBALANCE (aprox. con LTF) =============================
+ltfCloses = request.security_lower_tf(syminfo.tickerid, deltaLtf, close)
+ltfOpens  = request.security_lower_tf(syminfo.tickerid, deltaLtf, open)
+ltfVols   = request.security_lower_tf(syminfo.tickerid, deltaLtf, volume)
+
+barDelta = 0.0
+if array.size(ltfCloses) > 0
+    for i = 0 to array.size(ltfCloses) - 1
+        c = array.get(ltfCloses, i)
+        o = array.get(ltfOpens, i)
+        v = array.get(ltfVols, i)
+        barDelta += c > o ? v : c < o ? -v : 0.0
+
+avgAbsDelta = ta.sma(math.abs(barDelta), deltaLookback)
+deltaImbalanceOk = avgAbsDelta > 0 and math.abs(barDelta) > avgAbsDelta * deltaThreshold
+
+// ============================= 5) SMT DIVERGENCE (E2 / E3) =============================
+[e2High, e2Low] = request.security(smtSymbol2, timeframe.period, [high, low], lookahead=barmerge.lookahead_off)
+[e3High, e3Low] = request.security(smtSymbol3, timeframe.period, [high, low], lookahead=barmerge.lookahead_off)
+
+e2PH = ta.pivothigh(e2High, swingLen, swingLen)
+e2PL = ta.pivotlow(e2Low, swingLen, swingLen)
+e3PH = ta.pivothigh(e3High, swingLen, swingLen)
+e3PL = ta.pivotlow(e3Low, swingLen, swingLen)
+
+var float prevMainPH = na
+var float prevMainPL = na
+var float prevE2PH = na
+var float prevE2PL = na
+var float prevE3PH = na
+var float prevE3PL = na
+
+var bool smtBearActive = false
+var bool smtBullActive = false
+var int  smtBearBar = na
+var int  smtBullBar = na
+
+if not na(swingPH)
+    if not na(prevMainPH)
+        mainHigherHigh = swingPH > prevMainPH
+        e2LowerHigh = not na(e2PH) and not na(prevE2PH) and e2PH < prevE2PH
+        e3LowerHigh = not na(e3PH) and not na(prevE3PH) and e3PH < prevE3PH
+        if mainHigherHigh and (e2LowerHigh or e3LowerHigh)
+            smtBearActive := true
+            smtBearBar := bar_index
+    prevMainPH := swingPH
+if not na(e2PH)
+    prevE2PH := e2PH
+if not na(e3PH)
+    prevE3PH := e3PH
+
+if not na(swingPL)
+    if not na(prevMainPL)
+        mainLowerLow = swingPL < prevMainPL
+        e2HigherLow = not na(e2PL) and not na(prevE2PL) and e2PL > prevE2PL
+        e3HigherLow = not na(e3PL) and not na(prevE3PL) and e3PL > prevE3PL
+        if mainLowerLow and (e2HigherLow or e3HigherLow)
+            smtBullActive := true
+            smtBullBar := bar_index
+    prevMainPL := swingPL
+if not na(e2PL)
+    prevE2PL := e2PL
+if not na(e3PL)
+    prevE3PL := e3PL
+
+if smtBearActive and (bar_index - smtBearBar > sweepValidBars)
+    smtBearActive := false
+if smtBullActive and (bar_index - smtBullBar > sweepValidBars)
+    smtBullActive := false
+
+smtOk = smtBearActive or smtBullActive
+
+// ============================= SETUP GRADE =============================
+checksTrue = (liquiditySweepOk ? 1 : 0) + (htfPdaDelivered ? 1 : 0) + (deltaImbalanceOk ? 1 : 0) + (ifvgOk ? 1 : 0) + (clearTargetsOk ? 1 : 0) + (smtOk ? 1 : 0)
+
+gradeText = checksTrue >= 6 ? "A+" : checksTrue == 5 ? "A" : checksTrue == 4 ? "B" : checksTrue == 3 ? "C" : checksTrue == 2 ? "D" : "F"
+gradeColor = checksTrue >= 5 ? color.new(color.green, 0) : checksTrue >= 3 ? color.new(color.orange, 0) : color.new(color.red, 0)
+
+// ============================= PANEL =============================
+var table gradeTable = table.new(tablePos, 2, 8, border_width=1, border_color=color.new(color.gray, 40))
+
+checkRow(rowIdx, txt, ok) =>
+    table.cell(gradeTable, 0, rowIdx, txt, bgcolor=color.new(color.gray, 70), text_color=color.white, text_size=tsize, text_halign=text.align_left)
+    table.cell(gradeTable, 1, rowIdx, ok ? "✔" : "✘", bgcolor=ok ? color.new(color.green, 40) : color.new(color.red, 40), text_color=color.white, text_size=tsize)
+
+if showPanel and barstate.islast
+    table.cell(gradeTable, 0, 0, "Setup Grade  " + gradeText, bgcolor=gradeColor, text_color=color.white, text_size=tsize)
+    table.cell(gradeTable, 1, 0, syminfo.ticker + "  " + str.tostring(close, format.mintick), bgcolor=gradeColor, text_color=color.white, text_size=tsize)
+    table.cell(gradeTable, 0, 1, "Checklist", bgcolor=color.new(color.gray, 20), text_color=color.white, text_size=tsize)
+    table.cell(gradeTable, 1, 1, "Status", bgcolor=color.new(color.gray, 20), text_color=color.white, text_size=tsize)
+    checkRow(2, "Liquidity Sweep", liquiditySweepOk)
+    checkRow(3, "HTF PDA Delivery", htfPdaDelivered)
+    checkRow(4, "Delta Imbalance", deltaImbalanceOk)
+    checkRow(5, "IFVG", ifvgOk)
+    checkRow(6, "Clear Targets", clearTargetsOk)
+    checkRow(7, "SMT w/ E3", smtOk)
+
+// ============================= PLAN DE TRADE (Entrada/SL/TP + tamaño) =============================
+bullEntrySignal = newBullFvg and bullSweepActive and checksTrue >= minGradeForPlan
+bearEntrySignal = newBearFvg and bearSweepActive and checksTrue >= minGradeForPlan
+
+var box   slBox   = na
+var box   tpBox   = na
+var label planLbl = na
+
+clearPlan() =>
+    if not na(slBox)
+        box.delete(slBox)
+    if not na(tpBox)
+        box.delete(tpBox)
+    if not na(planLbl)
+        label.delete(planLbl)
+
+if showTradePlan and (bullEntrySignal or bearEntrySignal)
+    clearPlan()
+    isBull = bullEntrySignal
+    entryPrice = isBull ? bullBot : bearTop
+    stopPrice  = isBull ? bullSweepLow - atrVal * slBufferAtrMult : bearSweepHigh + atrVal * slBufferAtrMult
+    targetPrice = isBull ? lastPivotHigh : lastPivotLow
+
+    stopDist = math.abs(entryPrice - stopPrice)
+    riskAmount = accountSize * riskPercent / 100
+    perContractRisk = stopDist * syminfo.pointvalue
+    contracts = perContractRisk > 0 ? math.max(math.floor(riskAmount / perContractRisk), 0) : 0
+    dollarRisk = contracts * perContractRisk
+
+    rightX = bar_index + planBarsExtend
+    slBox := box.new(bar_index, entryPrice, rightX, stopPrice, border_color=color.new(color.red, 0), bgcolor=color.new(color.red, 85))
+    tpBox := box.new(bar_index, entryPrice, rightX, targetPrice, border_color=color.new(color.green, 0), bgcolor=color.new(color.green, 85))
+    planLbl := label.new(bar_index, entryPrice, str.tostring(contracts) + " contracts = $" + str.tostring(dollarRisk, "#"), style=isBull ? label.style_label_up : label.style_label_down, color=color.new(color.blue, 0), textcolor=color.white, size=size.small)
+
+if showTradePlan and not na(slBox)
+    box.set_right(slBox, bar_index + planBarsExtend)
+    box.set_right(tpBox, bar_index + planBarsExtend)
+
+// ============================= ALERTAS =============================
+alertcondition(bullEntrySignal, title="Setup alcista confirmado", message="Sweep + FVG alcista con Setup Grade suficiente")
+alertcondition(bearEntrySignal, title="Setup bajista confirmado", message="Sweep + FVG bajista con Setup Grade suficiente")
+alertcondition(checksTrue >= 5, title="Setup Grade A/A+", message="El Setup Grade alcanzó A o A+")

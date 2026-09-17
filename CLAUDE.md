@@ -4,38 +4,50 @@ This file gives Claude Code (and other AI assistants) guidance for working in th
 
 ## Repository status
 
-As of 2026-08-15, **this repository is empty** — it has no commits, no source files, and no
-configuration (no `package.json`, `pyproject.toml`, `go.mod`, etc.). There is currently no
-codebase, build system, test suite, or established convention to document.
+This repo hosts TradingView **Pine Script (v6) indicators**, focused on ICT-style price-action
+concepts (Fair Value Gaps, liquidity sweeps, SMT divergence, session levels, etc.). There is no
+package manager, build system, or test suite — Pine scripts are plain `.pine` text files that get
+pasted/synced into TradingView's Pine Editor.
 
-This file is a placeholder. Regenerate/expand it once real code lands — see "Keeping this file
-up to date" below.
+## Codebase structure
 
-## What to do until real code exists
+- `indicators/` — one `.pine` file per indicator.
+  - `fvg_ifvg.pine` — Fair Value Gap / Inverse Fair Value Gap indicator, plus PDH/PDL and previous
+    NY/London session high-low levels.
+  - `setup_grade_checklist.pine` — "Setup Grade" panel: scores the current setup against a
+    6-item ICT checklist (Liquidity Sweep, HTF PDA Delivery, Delta Imbalance, IFVG, Clear
+    Targets, SMT w/ E3), shows a letter grade in a table (mimicking the "Setup Grade" panel
+    style), and optionally draws an entry/SL/TP trade plan with position size based on account
+    risk %.
 
-- Don't assume a language, framework, or project layout that hasn't been established yet.
-- If asked to scaffold a new project here, confirm with the user what kind of project `bot` is
-  meant to be (e.g. a Slack/Discord bot, a CLI tool, a web service) before generating files,
-  since the repo name alone doesn't specify this.
-- Once the first real commit(s) land, update every section below from what's actually in the
-  tree — do not leave speculative content in place.
+## Development workflow
 
-## Sections to fill in once code exists
+- There's no local runner for Pine Script; scripts are validated by pasting them into
+  TradingView's Pine Editor (Add indicator → Pine Editor → paste → "Add to chart") and checking
+  the compiler output there.
+- No linter/formatter is configured — follow the indentation-sensitive Pine syntax carefully
+  (4-space indents per nesting level) and match the style of existing files.
 
-Replace this section with the real details as soon as there's something to describe:
+## Conventions
 
-- **Codebase structure** — top-level directories/packages and what each contains.
-- **Development workflow** — how to install dependencies, run the project locally, run the test
-  suite, and lint/format the code (exact commands, not generic advice).
-- **Architecture notes** — key modules, entry points, data flow, and any non-obvious design
-  decisions worth preserving.
-- **Conventions** — naming, file organization, commit/PR style, and anything else contributors
-  (human or AI) should follow consistently.
-- **Branching / CI** — default branch name, required checks, and how PRs get merged.
+- Scripts target `//@version=6`.
+- UI text, input labels, and code comments are written in **Spanish**, matching the existing
+  indicators — keep new indicators consistent with this unless the user asks otherwise.
+- Reusable zone/box tracking uses a small `type` (e.g. `Zone`) plus `var array<Zone>` so drawn
+  objects (boxes/lines/labels) can be trimmed and mitigated across bars without leaking.
+- Multi-timeframe or multi-symbol logic (`request.security`, `request.security_lower_tf`) is an
+  approximation where Pine has no equivalent native data (e.g. there is no real order-flow delta
+  or object-level HTF FVG tracking) — such limitations are documented in a comment block at the
+  top of the file that uses them.
+- Avoid scaffolding an unrelated language/framework here; this repo is Pine Script only unless
+  the user explicitly asks for something else.
+
+## Branching / CI
+
+No CI is configured. There's no fixed default-branch convention documented yet beyond what's used
+for active work — check `git branch -a` / the remote's default branch before assuming one.
 
 ## Keeping this file up to date
 
-When you add the first meaningful code to this repository, regenerate this file (the `init`
-Claude Code skill does this automatically by scanning the repo) rather than editing this
-placeholder piecemeal. Keep CLAUDE.md in sync with the codebase going forward — update it
-whenever structure, workflows, or conventions change materially.
+Update this file whenever a new indicator is added or an existing one's scope changes materially
+— add it to "Codebase structure" above rather than leaving this file describing an empty repo.
