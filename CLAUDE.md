@@ -8,11 +8,9 @@ This file gives Claude Code (and other AI assistants) guidance for working in th
 in the style of "Manager Pro" apps for the sector. Covers appointments/scheduling, client CRM
 with technical history, point-of-sale/invoicing, inventory, staff commissions, and reporting.
 
-The project has a real (seeded) PostgreSQL database and one working screen: the home dashboard
-(`src/app/page.tsx`) reads live data from Postgres via Prisma and renders it in a modern
-dashboard UI (sidebar nav, stat tiles, per-module preview cards). Authentication and the
-per-module CRUD screens (Agenda, CRM, TPV, Stock, Comisiones, Informes as full pages) are not
-built yet — today's UI only *previews* those modules on the dashboard.
+The project is in its **initial scaffold stage**: the data model (Prisma schema) is fully
+designed and the Next.js app builds and runs, but business logic, authentication, and the API
+layer are not implemented yet.
 
 ## Stack
 
@@ -24,17 +22,8 @@ built yet — today's UI only *previews* those modules on the dashboard.
 
 ## Codebase structure
 
-- `src/app/` — Next.js App Router pages and layouts. `page.tsx` is a dynamically-rendered
-  (`export const dynamic = "force-dynamic"`) server component that queries Postgres via
-  `src/lib/dashboard.ts` and renders today's stats plus a preview card per module.
-- `src/lib/prisma.ts` — the shared `PrismaClient` singleton (avoids exhausting DB connections
-  from hot-reloaded dev instances).
-- `src/lib/dashboard.ts` — all the dashboard's data-fetching/aggregation queries, single-tenant
-  (`prisma.tenant.findFirst()`) until per-tenant auth exists.
-- `src/components/Icons.tsx` — the inline SVG icon sprite used by the sidebar and module cards.
-- `prisma/seed.ts` — example data (`npm run db:seed`): one tenant ("Urban Beauty"), 3 stylists,
-  services/products, clients, today's appointments, one real invoice, and a few historical
-  invoices (Apr–Aug) purely so the revenue trend chart has something to plot.
+- `src/app/` — Next.js App Router pages and layouts. `page.tsx` currently renders a placeholder
+  dashboard listing the six functional modules.
 - `prisma/schema.prisma` — the full relational data model, organized in commented sections:
   1. Tenants & users (multi-tenant: every business table hangs off a `Tenant`)
   2. CRM — clients, technical notes (dye formulas, allergies), append-only history
@@ -52,18 +41,17 @@ built yet — today's UI only *previews* those modules on the dashboard.
 ```bash
 npm install                 # install dependencies
 cp .env.example .env         # then point DATABASE_URL at a real Postgres instance
-npx prisma migrate dev       # create/apply a migration
-npm run db:seed              # load example data (safe to re-run after `prisma migrate reset`)
+npx prisma generate          # regenerate the Prisma client after any schema change
+npx prisma migrate dev       # create/apply a migration (needs a live database)
 npm run dev                  # start the dev server (http://localhost:3000)
 npm run build                # production build
 npm run typecheck            # tsc --noEmit
 npm run lint                 # next lint
 ```
 
-This dev container has a local PostgreSQL 16 server (`service postgresql start`) with a
-`salon_manager` database/role already created and referenced from `.env` (gitignored, not
-committed). A real deployment needs its own hosted Postgres — swap `DATABASE_URL` and re-run
-`prisma migrate deploy`.
+There is no live database configured in this environment — schema changes are validated with
+`prisma generate`/`prisma format`, not `prisma migrate`, until a real Postgres instance is wired
+up.
 
 ## Architecture notes / conventions
 
@@ -98,26 +86,15 @@ committed). A real deployment needs its own hosted Postgres — swap `DATABASE_U
 
 ## Next steps (not yet built)
 
-- Authentication & authorization (per-tenant users, role-based access per `UserRole`) — needed
-  before the single-tenant `findFirst()` shortcut in `dashboard.ts` can go away.
+- Authentication & authorization (per-tenant users, role-based access per `UserRole`).
 - API routes / server actions implementing the business logic for each module (appointment
   overlap validation, invoice numbering + hash chain, stock deduction on sale/internal use,
   commission calculation).
-- Full CRUD pages for each of the six modules — the dashboard only previews them today.
-- Swapping the local dev Postgres for a real hosted instance for production use.
+- Real UI for each of the six modules (currently only a placeholder landing page exists).
+- A live PostgreSQL instance + first `prisma migrate dev` to create actual tables.
 
 ## Keeping this file up to date
 
 Update this file whenever structure, workflows, or conventions change materially — especially
 once authentication, API routes, and real UI screens are added, since right now this describes a
 schema-and-scaffold-only stage.
-
-<!-- BEGIN:nextjs-agent-rules -->
-
-# This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
