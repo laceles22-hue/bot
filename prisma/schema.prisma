@@ -1,0 +1,509 @@
+// Esquema de base de datos para el ERP/TPV de peluquerías.
+// Multi-tenant: toda tabla de negocio cuelga de un Tenant (un salón / cliente del SaaS).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// 1. Tenants y usuarios
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id             String   @id @default(cuid())
+  name           String
+  taxId          String?  @map("tax_id")
+  fiscalSettings Json?    @map("fiscal_settings")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  users             User[]
+  clients           Client[]
+  serviceCategories ServiceCategory[]
+  services          Service[]
+  productCategories ProductCategory[]
+  products          Product[]
+  appointments      Appointment[]
+  invoiceSeries     InvoiceSeries[]
+  invoices          Invoice[]
+  cashSessions      CashSession[]
+  stockMovements    StockMovement[]
+  suppliers         Supplier[]
+  purchaseOrders    PurchaseOrder[]
+  commissionRules   CommissionRule[]
+  commissionRecords CommissionRecord[]
+
+  @@map("tenants")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  STYLIST
+  RECEPTIONIST
+}
+
+model User {
+  id           String    @id @default(cuid())
+  tenantId     String    @map("tenant_id")
+  email        String
+  passwordHash String    @map("password_hash")
+  fullName     String    @map("full_name")
+  role         UserRole
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  tenant            Tenant                @relation(fields: [tenantId], references: [id])
+  schedules         EmployeeSchedule[]
+  appointments      Appointment[]         @relation("AppointmentEmployee")
+  technicalNotes    ClientTechnicalNote[]
+  cashSessions      CashSession[]
+  commissionRules   CommissionRule[]
+  commissionRecords CommissionRecord[]
+
+  @@unique([tenantId, email])
+  @@map("users")
+}
+
+model EmployeeSchedule {
+  id        String @id @default(cuid())
+  userId    String @map("user_id")
+  weekday   Int // 0 = domingo ... 6 = sábado
+  startTime String @map("start_time") // "09:00"
+  endTime   String @map("end_time") // "18:00"
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("employee_schedules")
+}
+
+// ---------------------------------------------------------------------------
+// 2. CRM — Ficha de cliente
+// ---------------------------------------------------------------------------
+
+model Client {
+  id            String    @id @default(cuid())
+  tenantId      String    @map("tenant_id")
+  firstName     String    @map("first_name")
+  lastName      String    @map("last_name")
+  phone         String?
+  email         String?
+  birthDate     DateTime? @map("birth_date")
+  gdprConsent   Boolean   @default(false) @map("gdpr_consent")
+  gdprConsentAt DateTime? @map("gdpr_consent_at")
+  notes         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  tenant         Tenant                @relation(fields: [tenantId], references: [id])
+  technicalNotes ClientTechnicalNote[]
+  allergies      ClientAllergy[]
+  appointments   Appointment[]
+  invoices       Invoice[]
+
+  @@index([tenantId])
+  @@map("clients")
+}
+
+enum TechnicalNoteType {
+  FORMULA_TINTE
+  DECOLORACION
+  QUERATINA
+  ALERGIA
+  OTRO
+}
+
+model ClientTechnicalNote {
+  id           String            @id @default(cuid())
+  clientId     String            @map("client_id")
+  authorUserId String            @map("author_user_id")
+  type         TechnicalNoteType
+  content      Json
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id])
+  author User   @relation(fields: [authorUserId], references: [id])
+
+  @@index([clientId])
+  @@map("client_technical_notes")
+}
+
+model ClientAllergy {
+  id        String  @id @default(cuid())
+  clientId  String  @map("client_id")
+  substance String
+  severity  String?
+  notes     String?
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@map("client_allergies")
+}
+
+// ---------------------------------------------------------------------------
+// 3. Catálogo — Servicios y productos
+// ---------------------------------------------------------------------------
+
+model ServiceCategory {
+  id       String @id @default(cuid())
+  tenantId String @map("tenant_id")
+  name     String
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  services Service[]
+
+  @@map("service_categories")
+}
+
+model Service {
+  id              String  @id @default(cuid())
+  tenantId        String  @map("tenant_id")
+  categoryId      String? @map("category_id")
+  name            String
+  durationMinutes Int     @map("duration_minutes")
+  basePrice       Decimal @map("base_price") @db.Decimal(10, 2)
+  active          Boolean @default(true)
+
+  tenant              Tenant               @relation(fields: [tenantId], references: [id])
+  category            ServiceCategory?     @relation(fields: [categoryId], references: [id])
+  appointmentServices AppointmentService[]
+  commissionRules     CommissionRule[]
+
+  @@map("services")
+}
+
+enum ProductType {
+  RETAIL
+  INTERNAL_USE
+  BOTH
+}
+
+model ProductCategory {
+  id       String @id @default(cuid())
+  tenantId String @map("tenant_id")
+  name     String
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  products Product[]
+
+  @@map("product_categories")
+}
+
+model Product {
+  id            String      @id @default(cuid())
+  tenantId      String      @map("tenant_id")
+  categoryId    String?     @map("category_id")
+  sku           String
+  name          String
+  type          ProductType
+  unitCost      Decimal     @map("unit_cost") @db.Decimal(10, 2)
+  retailPrice   Decimal?    @map("retail_price") @db.Decimal(10, 2)
+  stockQty      Decimal     @default(0) @map("stock_qty") @db.Decimal(10, 2)
+  minStockAlert Decimal?    @map("min_stock_alert") @db.Decimal(10, 2)
+  active        Boolean     @default(true)
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  category           ProductCategory?    @relation(fields: [categoryId], references: [id])
+  stockMovements     StockMovement[]
+  purchaseOrderLines PurchaseOrderLine[]
+  commissionRules    CommissionRule[]
+
+  @@unique([tenantId, sku])
+  @@map("products")
+}
+
+// ---------------------------------------------------------------------------
+// 4. Agenda y citas
+// ---------------------------------------------------------------------------
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  DONE
+  CANCELLED
+  NO_SHOW
+}
+
+model Appointment {
+  id         String            @id @default(cuid())
+  tenantId   String            @map("tenant_id")
+  clientId   String            @map("client_id")
+  employeeId String            @map("employee_id")
+  startTime  DateTime          @map("start_time")
+  endTime    DateTime          @map("end_time")
+  status     AppointmentStatus @default(PENDING)
+  createdAt  DateTime          @default(now()) @map("created_at")
+
+  tenant   Tenant               @relation(fields: [tenantId], references: [id])
+  client   Client               @relation(fields: [clientId], references: [id])
+  employee User                 @relation("AppointmentEmployee", fields: [employeeId], references: [id])
+  services AppointmentService[]
+
+  // Nota: Postgres permite añadir además una constraint EXCLUDE con tstzrange
+  // sobre (employee_id, start_time, end_time) vía una migración manual,
+  // para garantizar a nivel de BD que un empleado no tenga citas solapadas.
+  @@index([tenantId, employeeId, startTime])
+  @@map("appointments")
+}
+
+model AppointmentService {
+  id             String  @id @default(cuid())
+  appointmentId  String  @map("appointment_id")
+  serviceId      String  @map("service_id")
+  priceAtBooking Decimal @map("price_at_booking") @db.Decimal(10, 2)
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id])
+  service     Service     @relation(fields: [serviceId], references: [id])
+
+  @@map("appointment_services")
+}
+
+// ---------------------------------------------------------------------------
+// 5. TPV / Facturación
+// ---------------------------------------------------------------------------
+
+model InvoiceSeries {
+  id            String @id @default(cuid())
+  tenantId      String @map("tenant_id")
+  seriesCode    String @map("series_code")
+  currentNumber Int    @default(0) @map("current_number")
+  year          Int
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  invoices Invoice[]
+
+  @@unique([tenantId, seriesCode, year])
+  @@map("invoice_series")
+}
+
+enum InvoiceStatus {
+  ISSUED
+  CANCELLED
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  tenantId      String        @map("tenant_id")
+  seriesId      String        @map("series_id")
+  invoiceNumber Int           @map("invoice_number")
+  clientId      String?       @map("client_id")
+  issuedAt      DateTime      @default(now()) @map("issued_at")
+  status        InvoiceStatus @default(ISSUED)
+  totalAmount   Decimal       @map("total_amount") @db.Decimal(10, 2)
+  taxAmount     Decimal       @map("tax_amount") @db.Decimal(10, 2)
+  hashPrev      String?       @map("hash_prev")
+  hashSelf      String?       @map("hash_self")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  series            InvoiceSeries      @relation(fields: [seriesId], references: [id])
+  client            Client?            @relation(fields: [clientId], references: [id])
+  lines             InvoiceLine[]
+  payments          Payment[]
+  cashMovements     CashMovement[]
+  commissionRecords CommissionRecord[]
+
+  @@unique([tenantId, seriesId, invoiceNumber])
+  @@map("invoices")
+}
+
+enum InvoiceLineType {
+  SERVICE
+  PRODUCT
+}
+
+model InvoiceLine {
+  id          String          @id @default(cuid())
+  invoiceId   String          @map("invoice_id")
+  lineType    InvoiceLineType @map("line_type")
+  referenceId String          @map("reference_id") // id de Service o Product según lineType
+  description String
+  quantity    Decimal         @db.Decimal(10, 2)
+  unitPrice   Decimal         @map("unit_price") @db.Decimal(10, 2)
+  taxRate     Decimal         @map("tax_rate") @db.Decimal(5, 2)
+  lineTotal   Decimal         @map("line_total") @db.Decimal(10, 2)
+
+  invoice           Invoice            @relation(fields: [invoiceId], references: [id])
+  commissionRecords CommissionRecord[]
+
+  @@map("invoice_lines")
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BIZUM
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  invoiceId String        @map("invoice_id")
+  method    PaymentMethod
+  amount    Decimal       @db.Decimal(10, 2)
+  paidAt    DateTime      @default(now()) @map("paid_at")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@map("payments")
+}
+
+// ---------------------------------------------------------------------------
+// 6. Caja (arqueos)
+// ---------------------------------------------------------------------------
+
+model CashSession {
+  id                    String    @id @default(cuid())
+  tenantId              String    @map("tenant_id")
+  userId                String    @map("user_id")
+  openedAt              DateTime  @default(now()) @map("opened_at")
+  closedAt              DateTime? @map("closed_at")
+  openingAmount         Decimal   @map("opening_amount") @db.Decimal(10, 2)
+  closingAmountDeclared Decimal?  @map("closing_amount_declared") @db.Decimal(10, 2)
+  closingAmountSystem   Decimal?  @map("closing_amount_system") @db.Decimal(10, 2)
+  notes                 String?
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id])
+  user      User           @relation(fields: [userId], references: [id])
+  movements CashMovement[]
+
+  @@map("cash_sessions")
+}
+
+enum CashMovementType {
+  SALE
+  WITHDRAWAL
+  DEPOSIT
+}
+
+model CashMovement {
+  id            String           @id @default(cuid())
+  cashSessionId String           @map("cash_session_id")
+  type          CashMovementType
+  amount        Decimal          @db.Decimal(10, 2)
+  invoiceId     String?          @map("invoice_id")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  cashSession CashSession @relation(fields: [cashSessionId], references: [id])
+  invoice     Invoice?    @relation(fields: [invoiceId], references: [id])
+
+  @@map("cash_movements")
+}
+
+// ---------------------------------------------------------------------------
+// 7. Stock e inventario
+// ---------------------------------------------------------------------------
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  INTERNAL_USE
+  ADJUSTMENT
+  LOSS
+}
+
+model StockMovement {
+  id                   String            @id @default(cuid())
+  tenantId             String            @map("tenant_id")
+  productId            String            @map("product_id")
+  type                 StockMovementType
+  quantity             Decimal           @db.Decimal(10, 2)
+  relatedInvoiceId     String?           @map("related_invoice_id")
+  relatedAppointmentId String?           @map("related_appointment_id")
+  createdAt            DateTime          @default(now()) @map("created_at")
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([tenantId, productId])
+  @@map("stock_movements")
+}
+
+model Supplier {
+  id          String @id @default(cuid())
+  tenantId    String @map("tenant_id")
+  name        String
+  contactInfo Json?  @map("contact_info")
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  purchaseOrders PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  ORDERED
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id         String              @id @default(cuid())
+  tenantId   String              @map("tenant_id")
+  supplierId String              @map("supplier_id")
+  status     PurchaseOrderStatus @default(DRAFT)
+  createdAt  DateTime            @default(now()) @map("created_at")
+
+  tenant   Tenant              @relation(fields: [tenantId], references: [id])
+  supplier Supplier            @relation(fields: [supplierId], references: [id])
+  lines    PurchaseOrderLine[]
+
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLine {
+  id              String  @id @default(cuid())
+  purchaseOrderId String  @map("purchase_order_id")
+  productId       String  @map("product_id")
+  quantity        Decimal @db.Decimal(10, 2)
+  unitCost        Decimal @map("unit_cost") @db.Decimal(10, 2)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  product       Product       @relation(fields: [productId], references: [id])
+
+  @@map("purchase_order_lines")
+}
+
+// ---------------------------------------------------------------------------
+// 8. Comisiones y rendimiento
+// ---------------------------------------------------------------------------
+
+model CommissionRule {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  employeeId  String?  @map("employee_id")
+  serviceId   String?  @map("service_id")
+  productId   String?  @map("product_id")
+  percentage  Decimal? @db.Decimal(5, 2)
+  fixedAmount Decimal? @map("fixed_amount") @db.Decimal(10, 2)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  employee User?    @relation(fields: [employeeId], references: [id])
+  service  Service? @relation(fields: [serviceId], references: [id])
+  product  Product? @relation(fields: [productId], references: [id])
+
+  @@map("commission_rules")
+}
+
+model CommissionRecord {
+  id            String   @id @default(cuid())
+  tenantId      String   @map("tenant_id")
+  employeeId    String   @map("employee_id")
+  invoiceId     String   @map("invoice_id")
+  invoiceLineId String   @map("invoice_line_id")
+  amount        Decimal  @db.Decimal(10, 2)
+  periodMonth   String   @map("period_month") // "2026-09"
+  calculatedAt  DateTime @default(now()) @map("calculated_at")
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
+  employee    User        @relation(fields: [employeeId], references: [id])
+  invoice     Invoice     @relation(fields: [invoiceId], references: [id])
+  invoiceLine InvoiceLine @relation(fields: [invoiceLineId], references: [id])
+
+  @@index([tenantId, employeeId, periodMonth])
+  @@map("commission_records")
+}
