@@ -9,7 +9,8 @@ suite: scripts are validated by pasting them into the TradingView Pine Editor.
 
 - `indicators/fvg_ifvg.pine` — FVG/IFVG indicator with session highs/lows.
 - `strategies/ifvg_personal.pine` — IFVG strategy for 1-minute charts that grades every
-  inversion A+..C (Dodgy's iFVG setup rating) and only trades grades >= a chosen minimum.
+  inversion A+..C (Dodgy's iFVG setup rating), checks CISD confirmation, and only trades
+  grades >= a chosen minimum.
 
 ## What to do until real code exists
 

@@ -33,13 +33,20 @@ float chopMax=input.float(61.8,"Choppiness >= es dia de consolidacion",minval=40
 bool useSMT=input.bool(false,"SMT con simbolo correlacionado (bonus)",group=gR)
 string smtSymbol=input.symbol("CME_MINI:ES1!","Simbolo SMT",group=gR)
 bool showGrades=input.bool(true,"Etiquetar todas las inversiones con su nota",group=gR)
-string g2="03 - Prueba historica"
+string gC="03 - CISD"
+string cisdMode=input.string("Mostrar","Uso del CISD",options=["Desactivado","Mostrar","Obligatorio"],tooltip="Mostrar: aparece en el checklist. Obligatorio: solo se entra si hubo un CISD a favor desde el origen del movimiento.",group=gC)
+bool showCISD=input.bool(true,"Dibujar niveles CISD",group=gC)
+color cisdBullColor=input.color(color.black,"Bullish",inline="bup",group=gC)
+string cisdBullText=input.string("CISD"," ",inline="bup",group=gC)
+color cisdBearColor=input.color(color.black,"Bearish",inline="bep",group=gC)
+string cisdBearText=input.string("CISD"," ",inline="bep",group=gC)
+string g2="04 - Prueba historica"
 int contracts=input.int(1,"Contratos",minval=1,maxval=20,group=g2)
 float minRR=input.float(1.0,"R minimo hasta liquidez",minval=0.1,step=0.25,group=g2)
 int pad=input.int(2,"Margen stop (ticks)",minval=1,group=g2)
 bool capRisk=input.bool(false,"Limitar riesgo estimado de entrada",group=g2)
 float riskBudget=input.float(50,"Presupuesto USD",minval=1,group=g2)
-string g3="04 - Aspecto"
+string g3="05 - Aspecto"
 bool lightTheme=input.bool(true,"Fondo claro como referencia",group=g3)
 bool showHTF=input.bool(true,"Mostrar FVG 5m y 15m",group=g3)
 bool showProfile=input.bool(true,"Perfil de volumen aproximado",group=g3)
@@ -129,6 +136,118 @@ if barstate.isconfirmed and useSMT
         smtBullBar:=bar_index
     if (high>priorHigh)!=(oHigh>oPriorHigh)
         smtBearBar:=bar_index
+
+// CISD (change in state of delivery), ported from the supplied body-only indicator.
+// Runs on confirmed closes only, so it does not repaint inside the live candle.
+// A bullish CISD = body closes above the open of the last bearish delivery (and vice versa).
+int cisdLook=5
+float minPullbackRatio=0.5
+f_bodyHigh(int offset) =>
+    math.max(open[offset],close[offset])
+f_bodyLow(int offset) =>
+    math.min(open[offset],close[offset])
+type Structure
+    float topPrice
+    float bottomPrice
+type CisdLevel
+    line level
+    label txt
+    bool completed
+var Structure structure=Structure.new(math.max(open,close),math.min(open,close))
+var array<CisdLevel> cisdLevelsBu=array.new<CisdLevel>()
+var array<CisdLevel> cisdLevelsBe=array.new<CisdLevel>()
+var bool isBullishPullback=false
+var bool isBearishPullback=false
+var float potentialTopPrice=na
+var float potentialBottomPrice=na
+var int bullishBreakIndex=na
+var int bearishBreakIndex=na
+var int cisdBullBar=na
+var int cisdBearBar=na
+f_cisd(float price,int fromBar,color ink,string caption) =>
+    line ln=line.new(fromBar,price,bar_index+cisdLook,price,color=showCISD?ink:na,width=1)
+    label lb=label.new(bar_index+cisdLook,price,showCISD?caption:"",color=color.new(color.white,100),textcolor=ink,style=label.style_label_left,size=size.small,text_formatting=text.format_italic)
+    CisdLevel.new(ln,lb,false)
+f_trim(array<CisdLevel> levels) =>
+    if array.size(levels)>1
+        CisdLevel old=array.shift(levels)
+        line.delete(old.level)
+        label.delete(old.txt)
+float pullbackBody=math.abs(close[1]-open[1])
+float prevBody=math.abs(close[2]-open[2])
+bool validPullback=prevBody>0 and pullbackBody>=minPullbackRatio*prevBody
+if barstate.isconfirmed and cisdMode!="Desactivado"
+    // Green body = bearish pullback anchor, red body = bullish pullback anchor.
+    if validPullback and close[1]>open[1] and not isBearishPullback
+        isBearishPullback:=true
+        potentialTopPrice:=open[1]
+        bullishBreakIndex:=bar_index-1
+    if validPullback and close[1]<open[1] and not isBullishPullback
+        isBullishPullback:=true
+        potentialBottomPrice:=open[1]
+        bearishBreakIndex:=bar_index-1
+    if isBullishPullback
+        if open<potentialBottomPrice
+            potentialBottomPrice:=open
+            bearishBreakIndex:=bar_index
+        if close<open and open>potentialBottomPrice
+            potentialBottomPrice:=open
+            bearishBreakIndex:=bar_index
+    if isBearishPullback
+        if open>potentialTopPrice
+            potentialTopPrice:=open
+            bullishBreakIndex:=bar_index
+        if close>open and open<potentialTopPrice
+            potentialTopPrice:=open
+            bullishBreakIndex:=bar_index
+    // Bearish structure break (body only) spawns a level above price.
+    if f_bodyLow(0)<structure.bottomPrice
+        structure.bottomPrice:=f_bodyLow(0)
+        if isBearishPullback and bar_index-bullishBreakIndex!=0
+            int back=math.min(bar_index-bullishBreakIndex,500)
+            structure.topPrice:=math.max(f_bodyHigh(back),f_bodyHigh(back+1))
+            isBearishPullback:=false
+            array.push(cisdLevelsBe,f_cisd(potentialTopPrice,bullishBreakIndex,cisdBullColor,cisdBullText))
+        else if close[1]>open[1] and close<open
+            structure.topPrice:=f_bodyHigh(1)
+            isBearishPullback:=false
+            array.push(cisdLevelsBe,f_cisd(potentialTopPrice,bullishBreakIndex,cisdBullColor,cisdBullText))
+    // Bullish structure break (body only) spawns a level below price.
+    if f_bodyHigh(0)>structure.topPrice
+        structure.topPrice:=f_bodyHigh(0)
+        if isBullishPullback and bar_index-bearishBreakIndex!=0
+            int back=math.min(bar_index-bearishBreakIndex,500)
+            structure.bottomPrice:=math.min(f_bodyLow(back),f_bodyLow(back+1))
+            isBullishPullback:=false
+            array.push(cisdLevelsBu,f_cisd(potentialBottomPrice,bearishBreakIndex,cisdBearColor,cisdBearText))
+        else if close[1]<open[1] and close>open
+            structure.bottomPrice:=f_bodyLow(1)
+            isBullishPullback:=false
+            array.push(cisdLevelsBu,f_cisd(potentialBottomPrice,bearishBreakIndex,cisdBearColor,cisdBearText))
+    f_trim(cisdLevelsBu)
+    f_trim(cisdLevelsBe)
+    // Body closing below the level under price = bearish CISD.
+    if array.size(cisdLevelsBu)>=1
+        CisdLevel bu=array.last(cisdLevelsBu)
+        if not bu.completed
+            if f_bodyLow(0)<bu.level.get_y2()
+                bu.completed:=true
+                cisdBearBar:=bar_index
+                array.push(cisdLevelsBe,f_cisd(potentialTopPrice,bullishBreakIndex,cisdBullColor,cisdBullText))
+            else
+                bu.level.set_x2(bar_index+cisdLook)
+                bu.txt.set_x(bar_index+cisdLook)
+    // Body closing above the level over price = bullish CISD.
+    if array.size(cisdLevelsBe)>=1
+        CisdLevel be=array.last(cisdLevelsBe)
+        if not be.completed
+            if f_bodyHigh(0)>be.level.get_y2()
+                be.completed:=true
+                cisdBullBar:=bar_index
+                array.push(cisdLevelsBu,f_cisd(potentialBottomPrice,bearishBreakIndex,cisdBearColor,cisdBearText))
+            else
+                be.level.set_x2(bar_index+cisdLook)
+                be.txt.set_x(bar_index+cisdLook)
 
 // Day condition: Choppiness Index. High values = consolidation, which downgrades A setups.
 float chopRange=ta.highest(high,chopLen)-ta.lowest(low,chopLen)
@@ -391,6 +510,8 @@ int obstacles=direction==1?f_obstacles(bearGaps,-1,target):direction==-1?f_obsta
 int singleScore=obstacles>0?0:invCount==1?2:1
 // 5) Premium/discount: longs from discount, shorts from premium (measured at the origin).
 bool pdOK=direction==1?origin<=equilibrium:direction==-1?origin>=equilibrium:false
+// CISD in favour since the origin of the move (it may happen on the inversion candle itself).
+bool cisdOK=direction==1?not na(cisdBullBar) and cisdBullBar>=originBar:direction==-1?not na(cisdBearBar) and cisdBearBar>=originBar:false
 bool smtBonus=direction==1?not na(smtBullBar) and smtBullBar>=originBar-originTol:direction==-1?not na(smtBearBar) and smtBearBar>=originBar-originTol:false
 
 f_grade(int conf,int mom,int tgt,int single,bool pd,bool chopping) =>
@@ -411,13 +532,14 @@ f_grade(int conf,int mom,int tgt,int single,bool pd,bool chopping) =>
     r
 int gradeRank=direction==0?0:f_grade(confScore,momScore,targetScore,singleScore,pdOK,chopDay)
 string grade=array.get(gradeNames,gradeRank)
-string checklist=direction==0?"":"Liquidez: "+(liqTaken?"SI":"NO")+" | Reaccion FVG: "+(fvgReaction?"SI":"NO")+(isContinuation?" | Continuacion 50%":"")+"\nMomentum: "+(momScore==2?"fuerte":momScore==1?"con consolidacion":"bajo")+" ("+str.tostring(legBars)+" velas)"+"\nObjetivo: "+targetName+(confluence>0?" + confluencia":"")+" | R "+(na(rr)?"--":str.tostring(rr,"#.##"))+"\nFVG: "+(singleScore==2?"una":singleScore==1?"combinadas ("+str.tostring(invCount)+")":"no obvia ("+str.tostring(obstacles)+" pendientes)")+"\nPremium/Discount: "+(pdOK?"OK":"NO")+" | SMT: "+(useSMT?(smtBonus?"SI":"NO"):"N.D.")+"\nDia: "+(chopDay?"consolidacion":"normal")
+string checklist=direction==0?"":"Liquidez: "+(liqTaken?"SI":"NO")+" | Reaccion FVG: "+(fvgReaction?"SI":"NO")+(isContinuation?" | Continuacion 50%":"")+"\nMomentum: "+(momScore==2?"fuerte":momScore==1?"con consolidacion":"bajo")+" ("+str.tostring(legBars)+" velas)"+"\nObjetivo: "+targetName+(confluence>0?" + confluencia":"")+" | R "+(na(rr)?"--":str.tostring(rr,"#.##"))+"\nFVG: "+(singleScore==2?"una":singleScore==1?"combinadas ("+str.tostring(invCount)+")":"no obvia ("+str.tostring(obstacles)+" pendientes)")+"\nPremium/Discount: "+(pdOK?"OK":"NO")+" | SMT: "+(useSMT?(smtBonus?"SI":"NO"):"N.D.")+"\nCISD: "+(cisdMode=="Desactivado"?"N.D.":cisdOK?"SI":"NO")+" | Dia: "+(chopDay?"consolidacion":"normal")
 
 bool sessionOK=not limitSession or not na(time(timeframe.period,sessionInput,"America/New_York"))
 float estimatedRisk=(distance+2*syminfo.mintick)*syminfo.pointvalue*contracts+2.5*contracts
 bool riskOK=not capRisk or estimatedRisk<=riskBudget
 bool gradeOK=gradeRank>=minRank
-bool candidate=barstate.isconfirmed and direction!=0 and gradeOK and not internalInvalid and levelsOK and distance>=syminfo.mintick and rr>=minRR and sessionOK
+bool cisdGate=cisdMode!="Obligatorio" or cisdOK
+bool candidate=barstate.isconfirmed and direction!=0 and gradeOK and cisdGate and not internalInvalid and levelsOK and distance>=syminfo.mintick and rr>=minRR and sessionOK
 bool accepted=candidate and riskOK and strategy.position_size==0
 var int inversions=0
 var int candidates=0
@@ -431,7 +553,7 @@ if barstate.isconfirmed and direction!=0
     inversions+=1
     lastGrade:=grade
     lastChecklist:=checklist
-    lastReason:=not gradeOK?"Nota "+grade+" < "+minGrade:internalInvalid?"Nivel interno ya tomado":not levelsOK?"Falta BE/objetivo valido":na(rr) or rr<minRR?"R insuficiente":not sessionOK?"Fuera horario":not riskOK?"Riesgo excesivo":strategy.position_size!=0?"Posicion abierta":"Entrada "+grade
+    lastReason:=not gradeOK?"Nota "+grade+" < "+minGrade:not cisdGate?"Sin CISD":internalInvalid?"Nivel interno ya tomado":not levelsOK?"Falta BE/objetivo valido":na(rr) or rr<minRR?"R insuficiente":not sessionOK?"Fuera horario":not riskOK?"Riesgo excesivo":strategy.position_size!=0?"Posicion abierta":"Entrada "+grade
 if candidate
     candidates+=1
     if not riskOK
