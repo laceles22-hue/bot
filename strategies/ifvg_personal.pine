@@ -1,0 +1,594 @@
+//@version=6
+strategy("IFVG Personal | Calificacion Dodgy v3", overlay=true, initial_capital=25000, margin_long=5, margin_short=5, pyramiding=0, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission.cash_per_contract, commission_value=1.25, slippage=2, process_orders_on_close=true, max_boxes_count=150, max_lines_count=150, max_labels_count=200, max_bars_back=600)
+// Original implementation inspired by a screenshot. Not the protected indicator.
+// Standard 1-minute candles. Close-confirmed signals, simulated fills at close with slippage.
+// Mechanical interpretation of the supplied PDFs (modelo + "Dodgy's iFVG Setups Rating").
+// Every inversion is graded A+ .. C; only grades >= the chosen minimum are traded.
+string g1="01 - Senales"
+int gapTicks=input.int(2,"FVG minimo (ticks)",minval=1,group=g1)
+int expiry=input.int(60,"Caducidad FVG (velas)",minval=3,maxval=300,group=g1)
+int sweepLen=input.int(20,"Ventana barrido de liquidez",minval=3,maxval=100,group=g1)
+int originTol=input.int(3,"Barrido/reaccion: tolerancia vs origen (velas)",minval=0,maxval=20,group=g1)
+int internalLen=input.int(2,"Pivot interno: velas a cada lado",minval=1,maxval=10,group=g1)
+int externalLen=input.int(8,"Pivot ITH/ITL: velas a cada lado",minval=3,maxval=30,group=g1)
+bool continuation=input.bool(true,"Continuacion por retroceso al 50% cuenta como confluencia",group=g1)
+int modelLife=input.int(120,"Caducidad del modelo (velas)",minval=10,maxval=400,group=g1)
+string stopMode=input.string("Fallo + swing","Gestion stop",options=["Fallo + swing","Swing","Estrecho IFVG"],group=g1)
+bool useBE=input.bool(true,"Mover stop a entrada al tocar BE",group=g1)
+bool limitSession=input.bool(false,"Filtrar horario Nueva York",group=g1)
+string sessionInput=input.session("0930-1600","Horario NY",group=g1)
+string gR="02 - Calificacion (PDF Dodgy)"
+string minGrade=input.string("A-","Calificacion minima para operar",options=["A+","A","A-","B+","B","B-","C"],group=gR)
+float momStrong=input.float(1.0,"Momentum fuerte: cuerpo >= x ATR",minval=0.1,step=0.1,group=gR)
+float momWeak=input.float(0.6,"Momentum moderado: cuerpo >= x ATR",minval=0.1,step=0.1,group=gR)
+float dispMult=input.float(2.0,"Reaccion fuerte desde origen >= x ATR",minval=0.5,step=0.25,group=gR)
+int consMax=input.int(8,"Sin consolidacion: max velas origen -> inversion",minval=2,maxval=60,group=gR)
+int eqTol=input.int(2,"Tolerancia EQH/EQL (ticks)",minval=0,maxval=20,group=gR)
+int confTol=input.int(8,"Tolerancia confluencia de objetivos (ticks)",minval=1,maxval=40,group=gR)
+bool useData=input.bool(true,"Data Highs/Lows (vela de noticias)",group=gR)
+string dataSession=input.session("0830-0835","Ventana de datos NY",group=gR)
+int pdLen=input.int(180,"Rango premium/discount (velas)",minval=30,maxval=500,group=gR)
+int chopLen=input.int(120,"Choppiness: velas",minval=20,maxval=400,group=gR)
+float chopMax=input.float(61.8,"Choppiness >= es dia de consolidacion",minval=40,maxval=80,group=gR)
+bool useSMT=input.bool(false,"SMT con simbolo correlacionado (bonus)",group=gR)
+string smtSymbol=input.symbol("CME_MINI:ES1!","Simbolo SMT",group=gR)
+bool showGrades=input.bool(true,"Etiquetar todas las inversiones con su nota",group=gR)
+string g2="03 - Prueba historica"
+int contracts=input.int(1,"Contratos",minval=1,maxval=20,group=g2)
+float minRR=input.float(1.0,"R minimo hasta liquidez",minval=0.1,step=0.25,group=g2)
+int pad=input.int(2,"Margen stop (ticks)",minval=1,group=g2)
+bool capRisk=input.bool(false,"Limitar riesgo estimado de entrada",group=g2)
+float riskBudget=input.float(50,"Presupuesto USD",minval=1,group=g2)
+string g3="04 - Aspecto"
+bool lightTheme=input.bool(true,"Fondo claro como referencia",group=g3)
+bool showHTF=input.bool(true,"Mostrar FVG 5m y 15m",group=g3)
+bool showProfile=input.bool(true,"Perfil de volumen aproximado",group=g3)
+int profileBars=input.int(150,"Velas perfil",minval=30,maxval=400,group=g3)
+int profileBins=input.int(28,"Filas perfil",minval=10,maxval=50,group=g3)
+color zoneColor=input.color(color.new(color.gray,78),"Color zonas",group=g3)
+if barstate.isfirst and (not timeframe.isminutes or timeframe.multiplier!=1)
+    runtime.error("Usa velas estandar de 1 minuto para esta version.")
+bgcolor(lightTheme?color.new(color.rgb(217,220,231),0):na)
+barcolor(lightTheme?(close>=open?color.rgb(133,163,142):color.rgb(178,141,149)):na)
+
+var array<string> gradeNames=array.from("C","B-","B","B+","A-","A","A+")
+int minRank=array.indexof(gradeNames,minGrade)
+
+// Completed HTF candles only. The [1] offsets prevent historical future leakage.
+[t5,b5,s5,hi5,lo5,oldHi5,oldLo5]=request.security(syminfo.tickerid,"5",[time[1],low[1]>high[3],high[1]<low[3],high[1],low[1],high[3],low[3]],lookahead=barmerge.lookahead_on)
+[t15,b15,s15,hi15,lo15,oldHi15,oldLo15]=request.security(syminfo.tickerid,"15",[time[1],low[1]>high[3],high[1]<low[3],high[1],low[1],high[3],low[3]],lookahead=barmerge.lookahead_on)
+var array<box> zones=array.new<box>()
+var array<int> zoneDirs=array.new<int>()
+var array<bool> zoneLive=array.new<bool>()
+f_zone(float top,float bottom,int direction,string caption) =>
+    box z=box.new(bar_index,top,bar_index+20,bottom,bgcolor=showHTF?zoneColor:na,border_color=na,text=showHTF?caption:"",text_color=color.gray,text_size=size.tiny,text_halign=text.align_right)
+    array.push(zones,z)
+    array.push(zoneDirs,direction)
+    array.push(zoneLive,true)
+    if array.size(zones)>35
+        box.delete(array.shift(zones))
+        array.shift(zoneDirs)
+        array.shift(zoneLive)
+bool new5=ta.change(t5)!=0
+bool new15=ta.change(t15)!=0
+if barstate.isconfirmed
+    if new5
+        if b5
+            f_zone(lo5,oldHi5,1,"M5 FVG")
+        if s5
+            f_zone(oldLo5,hi5,-1,"M5 FVG")
+    if new15
+        if b15
+            f_zone(lo15,oldHi15,1,"M15 FVG")
+        if s15
+            f_zone(oldLo15,hi15,-1,"M15 FVG")
+// Last bar that touched a live HTF FVG without closing through it ("la vela lo respeta").
+var int touchBull=na
+var int touchBear=na
+if barstate.isconfirmed and array.size(zones)>0
+    for i=0 to array.size(zones)-1
+        if array.get(zoneLive,i)
+            box z=array.get(zones,i)
+            int d=array.get(zoneDirs,i)
+            float top=box.get_top(z)
+            float bottom=box.get_bottom(z)
+            bool invalid=d==1?close<bottom:close>top
+            if invalid
+                array.set(zoneLive,i,false)
+                box.set_right(z,bar_index)
+                box.set_bgcolor(z,showHTF?color.new(color.gray,92):na)
+            else
+                box.set_right(z,bar_index+20)
+                if low<=top and high>=bottom
+                    if d==1
+                        touchBull:=bar_index
+                    else
+                        touchBear:=bar_index
+
+// Liquidity sweeps: wick through the prior range, close back inside.
+float priorHigh=ta.highest(high[1],sweepLen)
+float priorLow=ta.lowest(low[1],sweepLen)
+bool sweepHigh=barstate.isconfirmed and high>priorHigh and close<priorHigh
+bool sweepLow=barstate.isconfirmed and low<priorLow and close>priorLow
+var int sweepHighBar=na
+var int sweepLowBar=na
+if sweepHigh
+    sweepHighBar:=bar_index
+if sweepLow
+    sweepLowBar:=bar_index
+plotshape(sweepHigh,title="Barrido maximos",style=shape.circle,location=location.abovebar,color=color.new(color.orange,15),size=size.tiny)
+plotshape(sweepLow,title="Barrido minimos",style=shape.circle,location=location.belowbar,color=color.new(color.blue,15),size=size.tiny)
+
+// SMT (bonus): one market breaks its prior extreme and the correlated one does not.
+string smtSym=useSMT?smtSymbol:syminfo.tickerid
+[oLow,oHigh,oPriorLow,oPriorHigh]=request.security(smtSym,timeframe.period,[low,high,ta.lowest(low[1],sweepLen),ta.highest(high[1],sweepLen)])
+var int smtBullBar=na
+var int smtBearBar=na
+if barstate.isconfirmed and useSMT
+    if (low<priorLow)!=(oLow<oPriorLow)
+        smtBullBar:=bar_index
+    if (high>priorHigh)!=(oHigh>oPriorHigh)
+        smtBearBar:=bar_index
+
+// Day condition: Choppiness Index. High values = consolidation, which downgrades A setups.
+float chopRange=ta.highest(high,chopLen)-ta.lowest(low,chopLen)
+float chopSum=math.sum(ta.atr(1),chopLen)
+float chop=chopRange>0?100*math.log10(chopSum/chopRange)/math.log10(chopLen):na
+bool chopDay=not na(chop) and chop>=chopMax
+float atr=ta.atr(14)
+float pdHi=ta.highest(high,pdLen)
+float pdLo=ta.lowest(low,pdLen)
+float equilibrium=(pdHi+pdLo)*0.5
+
+// Confirmed pivots only, kept until traded through. No retrospective signals.
+// Internal pivots = BE levels. External pivots = ITH/ITL. Matching pivots = EQH/EQL.
+var array<float> internalHighs=array.new<float>()
+var array<float> internalLows=array.new<float>()
+var array<float> externalHighs=array.new<float>()
+var array<float> externalLows=array.new<float>()
+var array<float> eqHighs=array.new<float>()
+var array<float> eqLows=array.new<float>()
+var array<float> dataHighs=array.new<float>()
+var array<float> dataLows=array.new<float>()
+f_push(array<float> values,float value) =>
+    if not na(value)
+        array.push(values,value)
+        if array.size(values)>80
+            array.shift(values)
+f_near(array<float> values,float reference,int direction) =>
+    float result=na
+    if array.size(values)>0
+        for v in values
+            if direction*(v-reference)>0 and (na(result) or direction*(v-result)<0)
+                result:=v
+    result
+f_purge(array<float> values,float extreme,int direction) =>
+    int i=array.size(values)-1
+    while i>=0
+        if direction*(extreme-array.get(values,i))>=0
+            array.remove(values,i)
+        i-=1
+f_equal(array<float> pool,array<float> out,float value,int direction) =>
+    if not na(value) and array.size(pool)>0
+        for v in pool
+            if math.abs(v-value)<=eqTol*syminfo.mintick
+                f_push(out,direction==1?math.max(v,value):math.min(v,value))
+                break
+float ih=ta.pivothigh(high,internalLen,internalLen)
+float il=ta.pivotlow(low,internalLen,internalLen)
+float eh=ta.pivothigh(high,externalLen,externalLen)
+float el=ta.pivotlow(low,externalLen,externalLen)
+if barstate.isconfirmed
+    f_equal(internalHighs,eqHighs,ih,1)
+    f_equal(internalLows,eqLows,il,-1)
+    f_push(internalHighs,ih)
+    f_push(internalLows,il)
+    f_push(externalHighs,eh)
+    f_push(externalLows,el)
+
+// Data highs/lows: range of the news window (08:30 NY by default), kept until taken.
+bool inData=useData and not na(time(timeframe.period,dataSession,"America/New_York"))
+bool dataStart=inData and not inData[1]
+bool dataEnd=inData[1] and not inData
+var float dataH=na
+var float dataL=na
+if barstate.isconfirmed
+    if dataEnd and not na(dataH)
+        f_push(dataHighs,dataH)
+        f_push(dataLows,dataL)
+        dataH:=na
+        dataL:=na
+    if dataStart
+        dataH:=high
+        dataL:=low
+    else if inData
+        dataH:=math.max(dataH,high)
+        dataL:=math.min(dataL,low)
+
+// A continuation can follow a valid reversal. The impulse freezes on its 50% pullback.
+var int modelDir=0
+var int modelBorn=na
+var float modelOrigin=na
+var float modelExtreme=na
+var float modelTarget=na
+var int pullbackBorn=na
+if barstate.isconfirmed and modelDir!=0
+    bool broken=bar_index-modelBorn>modelLife or (modelDir==1?low<=modelOrigin or high>=modelTarget:high>=modelOrigin or low<=modelTarget)
+    if broken
+        modelDir:=0
+        pullbackBorn:=na
+    else if bar_index>modelBorn and na(pullbackBorn)
+        float midpoint=(modelOrigin+modelExtreme)*0.5
+        bool retraced=modelDir==1?low<=midpoint:high>=midpoint
+        if retraced
+            pullbackBorn:=bar_index
+        else
+            modelExtreme:=modelDir==1?math.max(modelExtreme,high):math.min(modelExtreme,low)
+
+// Every 1m FVG is tracked (not only the latest), so stacked gaps can be detected.
+type Gap
+    float top
+    float bottom
+    int born
+    float be
+    bool beHit
+    float extreme
+    int extremeBar
+var array<Gap> bullGaps=array.new<Gap>()
+var array<Gap> bearGaps=array.new<Gap>()
+// side=1: bullish gaps, inverted by a close below them (short). side=-1: the mirror.
+// Several gaps inverted by the same candle are combined into one zone.
+f_scan(array<Gap> gaps,int side) =>
+    int count=0
+    float zTop=na
+    float zBottom=na
+    float be=na
+    int born=na
+    bool beHit=false
+    float ext=na
+    int extBar=na
+    int i=array.size(gaps)-1
+    while i>=0
+        Gap g=array.get(gaps,i)
+        if side*(side==1?high:low)>side*g.extreme
+            g.extreme:=side==1?high:low
+            g.extremeBar:=bar_index
+        g.beHit:=g.beHit or (not na(g.be) and (side==1?low<=g.be:high>=g.be))
+        bool expired=bar_index-g.born>expiry
+        bool inverted=not expired and (side==1?close<g.bottom:close>g.top)
+        if inverted
+            count+=1
+            zTop:=na(zTop)?g.top:math.max(zTop,g.top)
+            zBottom:=na(zBottom)?g.bottom:math.min(zBottom,g.bottom)
+            if na(born) or g.born>born
+                born:=g.born
+                be:=g.be
+                beHit:=g.beHit
+            if na(ext) or side*(g.extreme-ext)>0
+                ext:=g.extreme
+                extBar:=g.extremeBar
+        if expired or inverted
+            array.remove(gaps,i)
+        i-=1
+    [count,zTop,zBottom,be,born,beHit,ext,extBar]
+// Same-side gaps still standing between price and target: the FVG is not "una".
+f_obstacles(array<Gap> gaps,int side,float target) =>
+    int n=0
+    if not na(target) and array.size(gaps)>0
+        for g in gaps
+            if side==1?g.top<close and g.top>target:g.bottom>close and g.bottom<target
+                n+=1
+    n
+
+int bullCount=0
+float bullTop=na
+float bullBottom=na
+float bullBE=na
+int bullBorn=na
+bool bullBEHit=false
+float bullExt=na
+int bullExtBar=na
+int bearCount=0
+float bearTop=na
+float bearBottom=na
+float bearBE=na
+int bearBorn=na
+bool bearBEHit=false
+float bearExt=na
+int bearExtBar=na
+if barstate.isconfirmed
+    [c1,tp1,bt1,be1,bn1,bh1,ex1,eb1]=f_scan(bullGaps,1)
+    bullCount:=c1
+    bullTop:=tp1
+    bullBottom:=bt1
+    bullBE:=be1
+    bullBorn:=bn1
+    bullBEHit:=bh1
+    bullExt:=ex1
+    bullExtBar:=eb1
+    [c2,tp2,bt2,be2,bn2,bh2,ex2,eb2]=f_scan(bearGaps,-1)
+    bearCount:=c2
+    bearTop:=tp2
+    bearBottom:=bt2
+    bearBE:=be2
+    bearBorn:=bn2
+    bearBEHit:=bh2
+    bearExt:=ex2
+    bearExtBar:=eb2
+
+bool inverseLong=bearCount>0
+bool inverseShort=bullCount>0
+int direction=inverseLong and not inverseShort?1:inverseShort and not inverseLong?-1:0
+float signalGapTop=direction==1?bearTop:bullTop
+float signalGapBottom=direction==1?bearBottom:bullBottom
+int invCount=direction==1?bearCount:bullCount
+int gapBorn=direction==1?bearBorn:bullBorn
+bool internalInvalid=direction==1?bearBEHit:direction==-1?bullBEHit:false
+float origin=direction==1?bearExt:bullExt
+int originBar=direction==1?bearExtBar:bullExtBar
+float failureLevel=direction==1?signalGapTop:signalGapBottom
+float beLevel=direction==1?bearBE:bullBE
+float signalStop=direction==1?(stopMode=="Estrecho IFVG"?signalGapBottom:origin)-pad*syminfo.mintick:(stopMode=="Estrecho IFVG"?signalGapTop:origin)+pad*syminfo.mintick
+
+// Existing opposing HTF gaps can provide an earlier BE obstacle.
+if direction!=0 and array.size(zones)>0
+    for i=0 to array.size(zones)-1
+        if array.get(zoneLive,i) and array.get(zoneDirs,i)==-direction
+            box z=array.get(zones,i)
+            float edge=direction==1?box.get_bottom(z):box.get_top(z)
+            if direction*(edge-close)>0 and (na(beLevel) or direction*(edge-beLevel)<0)
+                beLevel:=edge
+
+// Target: nearest untaken liquidity beyond BE and beyond this candle.
+// kind 1 = ITH/ITL, 2 = EQH/EQL, 3 = Data high/low. Trendline liquidity (LRLR) is not detected.
+float reference=direction==1?math.max(beLevel,high):direction==-1?math.min(beLevel,low):na
+float tExt=direction==1?f_near(externalHighs,reference,1):direction==-1?f_near(externalLows,reference,-1):na
+float tEq=direction==1?f_near(eqHighs,reference,1):direction==-1?f_near(eqLows,reference,-1):na
+float tData=direction==1?f_near(dataHighs,reference,1):direction==-1?f_near(dataLows,reference,-1):na
+float target=na
+int targetKind=0
+if not na(tExt)
+    target:=tExt
+    targetKind:=1
+if not na(tEq) and (na(target) or direction*(tEq-target)<0)
+    target:=tEq
+    targetKind:=2
+if not na(tData) and (na(target) or direction*(tData-target)<0)
+    target:=tData
+    targetKind:=3
+int confluence=0
+if not na(target)
+    for lvl in array.from(tExt,tEq,tData)
+        if not na(lvl) and lvl!=target and math.abs(lvl-target)<=confTol*syminfo.mintick
+            confluence+=1
+string targetName=targetKind==1?(direction==1?"ITH":"ITL"):targetKind==2?(direction==1?"EQH":"EQL"):targetKind==3?(direction==1?"Data High":"Data Low"):"--"
+
+bool levelsOK=direction!=0 and not na(target) and not na(beLevel) and direction*(beLevel-close)>0 and direction*(target-beLevel)>0
+float distance=direction*(close-signalStop)
+float rr=levelsOK and distance>0?direction*(target-close)/distance:na
+
+// ---- Setup rating (PDF criteria) ----
+// 1) Liquidity sweep and/or reaction to an HTF FVG at the origin of the move.
+bool liqTaken=direction==1?not na(sweepLowBar) and sweepLowBar>=originBar-originTol:direction==-1?not na(sweepHighBar) and sweepHighBar>=originBar-originTol:false
+bool fvgReaction=direction==1?not na(touchBull) and touchBull>=originBar-originTol:direction==-1?not na(touchBear) and touchBear>=originBar-originTol:false
+bool isContinuation=continuation and direction!=0 and direction==modelDir and not na(pullbackBorn) and gapBorn>=pullbackBorn
+int confScore=(liqTaken?1:0)+(fvgReaction?1:0)
+if confScore==0 and isContinuation
+    confScore:=1
+// 2) Momentum on the inversion, without consolidation since the origin.
+float candleRange=high-low
+float body=math.abs(close-open)
+float closeLoc=candleRange>0?(direction==1?close-low:high-close)/candleRange:0
+int legBars=direction!=0 and not na(originBar)?bar_index-originBar:na
+bool strongBreak=body>=momStrong*atr and closeLoc>=0.6 and legBars<=consMax and direction*(close-origin)>=dispMult*atr
+bool fairBreak=body>=momWeak*atr and legBars<=consMax*2
+int momScore=direction==0?0:strongBreak?2:fairBreak?1:0
+// 3) Clear liquidity target with acceptable R.
+bool targetOK=levelsOK and not na(rr) and rr>=minRR
+int targetScore=not targetOK?0:(targetKind>=2 or confluence>0)?2:1
+// 4) One single FVG (several inverted at once count as combined).
+int obstacles=direction==1?f_obstacles(bearGaps,-1,target):direction==-1?f_obstacles(bullGaps,1,target):0
+int singleScore=obstacles>0?0:invCount==1?2:1
+// 5) Premium/discount: longs from discount, shorts from premium (measured at the origin).
+bool pdOK=direction==1?origin<=equilibrium:direction==-1?origin>=equilibrium:false
+bool smtBonus=direction==1?not na(smtBullBar) and smtBullBar>=originBar-originTol:direction==-1?not na(smtBearBar) and smtBearBar>=originBar-originTol:false
+
+f_grade(int conf,int mom,int tgt,int single,bool pd,bool chopping) =>
+    int r=0
+    if conf==2 and mom==2 and tgt>=1 and single>=1 and pd
+        r:=6
+    else if conf>=1 and mom==2 and tgt>=1 and single>=1 and pd
+        r:=5
+    else if conf>=1 and mom>=1 and tgt>=1 and single>=1 and pd
+        r:=4
+    else if tgt>=1 and pd and mom>=1
+        r:=2
+    else if tgt>=1 or pd
+        r:=1
+    // PDF: A setups on consolidation days become A-; A- on bad days become B+.
+    if chopping
+        r:=r==6?5:r==5?4:r==4?3:r
+    r
+int gradeRank=direction==0?0:f_grade(confScore,momScore,targetScore,singleScore,pdOK,chopDay)
+string grade=array.get(gradeNames,gradeRank)
+string checklist=direction==0?"":"Liquidez: "+(liqTaken?"SI":"NO")+" | Reaccion FVG: "+(fvgReaction?"SI":"NO")+(isContinuation?" | Continuacion 50%":"")+"\nMomentum: "+(momScore==2?"fuerte":momScore==1?"con consolidacion":"bajo")+" ("+str.tostring(legBars)+" velas)"+"\nObjetivo: "+targetName+(confluence>0?" + confluencia":"")+" | R "+(na(rr)?"--":str.tostring(rr,"#.##"))+"\nFVG: "+(singleScore==2?"una":singleScore==1?"combinadas ("+str.tostring(invCount)+")":"no obvia ("+str.tostring(obstacles)+" pendientes)")+"\nPremium/Discount: "+(pdOK?"OK":"NO")+" | SMT: "+(useSMT?(smtBonus?"SI":"NO"):"N.D.")+"\nDia: "+(chopDay?"consolidacion":"normal")
+
+bool sessionOK=not limitSession or not na(time(timeframe.period,sessionInput,"America/New_York"))
+float estimatedRisk=(distance+2*syminfo.mintick)*syminfo.pointvalue*contracts+2.5*contracts
+bool riskOK=not capRisk or estimatedRisk<=riskBudget
+bool gradeOK=gradeRank>=minRank
+bool candidate=barstate.isconfirmed and direction!=0 and gradeOK and not internalInvalid and levelsOK and distance>=syminfo.mintick and rr>=minRR and sessionOK
+bool accepted=candidate and riskOK and strategy.position_size==0
+var int inversions=0
+var int candidates=0
+var int skippedRisk=0
+var int entries=0
+var string lastReason="Esperando IFVG"
+var string lastGrade="--"
+var string lastChecklist=""
+var int lastDirection=0
+if barstate.isconfirmed and direction!=0
+    inversions+=1
+    lastGrade:=grade
+    lastChecklist:=checklist
+    lastReason:=not gradeOK?"Nota "+grade+" < "+minGrade:internalInvalid?"Nivel interno ya tomado":not levelsOK?"Falta BE/objetivo valido":na(rr) or rr<minRR?"R insuficiente":not sessionOK?"Fuera horario":not riskOK?"Riesgo excesivo":strategy.position_size!=0?"Posicion abierta":"Entrada "+grade
+if candidate
+    candidates+=1
+    if not riskOK
+        skippedRisk+=1
+
+var array<label> gradeLabels=array.new<label>()
+if showGrades and barstate.isconfirmed and direction!=0
+    color gradeInk=gradeRank>=5?color.rgb(38,140,80):gradeRank>=3?color.rgb(196,140,30):gradeRank>=1?color.gray:color.rgb(170,60,60)
+    array.push(gradeLabels,label.new(bar_index,na,grade,yloc=direction==1?yloc.belowbar:yloc.abovebar,style=direction==1?label.style_label_up:label.style_label_down,color=color.new(gradeInk,accepted?0:55),textcolor=color.white,size=accepted?size.small:size.tiny,tooltip=checklist))
+    if array.size(gradeLabels)>60
+        label.delete(array.shift(gradeLabels))
+
+var array<box> inverseBoxes=array.new<box>()
+var array<line> tradeLines=array.new<line>()
+var array<label> tradeLabels=array.new<label>()
+f_level(float price,string caption,color ink) =>
+    array.push(tradeLines,line.new(bar_index,price,bar_index+15,price,color=ink,style=line.style_dotted))
+    array.push(tradeLabels,label.new(bar_index+15,price,caption,style=label.style_none,textcolor=ink,size=size.tiny))
+    if array.size(tradeLines)>48
+        line.delete(array.shift(tradeLines))
+        label.delete(array.shift(tradeLabels))
+var float activeStop=na
+var float activeTarget=na
+var float activeBE=na
+var float activeFailure=na
+var bool beMoved=false
+// Updates after a confirmed close: BE cannot be assumed active earlier in this bar.
+if barstate.isconfirmed and strategy.position_size!=0
+    int liveDir=strategy.position_size>0?1:-1
+    if useBE and not beMoved and (liveDir==1?high>=activeBE:low<=activeBE)
+        activeStop:=liveDir==1?math.max(activeStop,strategy.position_avg_price):math.min(activeStop,strategy.position_avg_price)
+        beMoved:=true
+    if liveDir==1
+        strategy.exit("L-SLTP","L",stop=activeStop,limit=activeTarget)
+        if stopMode=="Fallo + swing" and close<activeFailure
+            strategy.close("L",comment="Fallo IFVG")
+    else
+        strategy.exit("S-SLTP","S",stop=activeStop,limit=activeTarget)
+        if stopMode=="Fallo + swing" and close>activeFailure
+            strategy.close("S",comment="Fallo IFVG")
+if accepted
+    array.push(inverseBoxes,box.new(bar_index,signalGapTop,bar_index+15,signalGapBottom,bgcolor=color.new(direction==1?color.blue:color.red,90),border_color=na,text="IFVG "+grade,text_color=color.gray,text_size=size.tiny))
+    if array.size(inverseBoxes)>25
+        box.delete(array.shift(inverseBoxes))
+    entries+=1
+    lastDirection:=direction
+    activeStop:=signalStop
+    activeTarget:=target
+    activeBE:=beLevel
+    activeFailure:=failureLevel
+    beMoved:=false
+    f_level(close,"Entrada "+grade+" | "+str.tostring(contracts)+" contrato(s)",direction==1?color.blue:color.red)
+    f_level(signalStop,"SL swing/IFVG",color.gray)
+    f_level(beLevel,"BE",color.rgb(186,132,32))
+    f_level(target,"TP "+targetName,color.gray)
+    // The entry comment carries the grade, used for the per-grade statistics.
+    if direction==1
+        strategy.entry("L",strategy.long,qty=contracts,comment=grade)
+        strategy.exit("L-SLTP","L",stop=activeStop,limit=activeTarget)
+    else
+        strategy.entry("S",strategy.short,qty=contracts,comment=grade)
+        strategy.exit("S-SLTP","S",stop=activeStop,limit=activeTarget)
+    modelDir:=direction
+    modelBorn:=bar_index
+    modelOrigin:=origin
+    modelExtreme:=direction==1?high:low
+    modelTarget:=target
+    pullbackBorn:=na
+    alert("IFVG "+grade+" "+(direction==1?"COMPRA":"VENTA")+" | "+syminfo.ticker+" | SL "+str.tostring(signalStop,format.mintick)+" | BE "+str.tostring(beLevel,format.mintick)+" | TP "+targetName+" "+str.tostring(target,format.mintick),alert.freq_once_per_bar_close)
+plotshape(accepted and direction==1,title="IFVG compra",style=shape.triangleup,location=location.belowbar,color=color.blue,size=size.tiny)
+plotshape(accepted and direction==-1,title="IFVG venta",style=shape.triangledown,location=location.abovebar,color=color.red,size=size.tiny)
+plot(strategy.position_size!=0?activeStop:na,"Stop activo",color=color.red,style=plot.style_linebr)
+
+// Remove levels only AFTER testing entry invalidation; do not replace a taken BE.
+if barstate.isconfirmed
+    f_purge(internalHighs,high,1)
+    f_purge(internalLows,low,-1)
+    f_purge(externalHighs,high,1)
+    f_purge(externalLows,low,-1)
+    f_purge(eqHighs,high,1)
+    f_purge(eqLows,low,-1)
+    f_purge(dataHighs,high,1)
+    f_purge(dataLows,low,-1)
+    if low-high[2]>=gapTicks*syminfo.mintick
+        float top3=math.max(high,math.max(high[1],high[2]))
+        int topBar=high>=top3?bar_index:high[1]>=top3?bar_index-1:bar_index-2
+        array.push(bullGaps,Gap.new(low,high[2],bar_index,f_near(internalLows,low,-1),false,top3,topBar))
+        if array.size(bullGaps)>30
+            array.shift(bullGaps)
+    if low[2]-high>=gapTicks*syminfo.mintick
+        float bottom3=math.min(low,math.min(low[1],low[2]))
+        int bottomBar=low<=bottom3?bar_index:low[1]<=bottom3?bar_index-1:bar_index-2
+        array.push(bearGaps,Gap.new(low[2],high,bar_index,f_near(internalHighs,high,1),false,bottom3,bottomBar))
+        if array.size(bearGaps)>30
+            array.shift(bearGaps)
+
+// Per-grade results from closed trades (entry comment = grade).
+var array<int> gradeTrades=array.new<int>(7,0)
+var array<int> gradeWins=array.new<int>(7,0)
+var array<float> gradePnl=array.new<float>(7,0.0)
+var int seenClosed=0
+if strategy.closedtrades>seenClosed
+    for i=seenClosed to strategy.closedtrades-1
+        int r=array.indexof(gradeNames,strategy.closedtrades.entry_comment(i))
+        if r>=0
+            float p=strategy.closedtrades.profit(i)
+            array.set(gradeTrades,r,array.get(gradeTrades,r)+1)
+            array.set(gradeWins,r,array.get(gradeWins,r)+(p>0?1:0))
+            array.set(gradePnl,r,array.get(gradePnl,r)+p)
+    seenClosed:=strategy.closedtrades
+
+// Approximation: each candle's entire volume is assigned to its HLC3 bin.
+// This is NOT exchange volume-at-price, delta, footprint or the original profile.
+var array<line> profile=array.new<line>()
+float rangeHi=ta.highest(high,profileBars)
+float rangeLo=ta.lowest(low,profileBars)
+if barstate.islast
+    if array.size(profile)>0
+        for ln in profile
+            line.delete(ln)
+        array.clear(profile)
+    if showProfile and bar_index>=profileBars and rangeHi>rangeLo
+        array<float> bins=array.new<float>(profileBins,0.0)
+        float step=(rangeHi-rangeLo)/profileBins
+        for j=0 to profileBars-1
+            int bucket=math.min(profileBins-1,math.max(0,int(math.floor((hlc3[j]-rangeLo)/step))))
+            array.set(bins,bucket,array.get(bins,bucket)+nz(volume[j]))
+        float largest=array.max(bins)
+        if largest>0
+            for k=0 to profileBins-1
+                float amount=array.get(bins,k)
+                int width=int(math.round(35*amount/largest))
+                float level=rangeLo+(k+0.5)*step
+                array.push(profile,line.new(bar_index+45-width,level,bar_index+45,level,color=amount>=largest*0.7?color.rgb(211,167,54):color.new(color.gray,25),width=2))
+var table panel=table.new(position.bottom_right,2,10,bgcolor=color.new(color.rgb(71,75,85),12),border_width=1)
+f_row(int row,string key,string value) =>
+    table.cell(panel,0,row,key,text_color=color.white,text_size=size.small,text_halign=text.align_left)
+    table.cell(panel,1,row,value,text_color=color.white,text_size=size.small,text_halign=text.align_left)
+var table stats=table.new(position.bottom_left,4,8,bgcolor=color.new(color.rgb(71,75,85),12),border_width=1)
+f_stat(int row,string a,string b,string c,string d) =>
+    table.cell(stats,0,row,a,text_color=color.white,text_size=size.small)
+    table.cell(stats,1,row,b,text_color=color.white,text_size=size.small)
+    table.cell(stats,2,row,c,text_color=color.white,text_size=size.small)
+    table.cell(stats,3,row,d,text_color=color.white,text_size=size.small)
+if barstate.islast
+    f_row(0,"IFVG PERSONAL v3","NO VALIDADO")
+    f_row(1,"Ultima nota",lastGrade+" (min "+minGrade+")")
+    f_row(2,"Checklist",lastChecklist==""?"--":lastChecklist)
+    f_row(3,"Ultima entrada",lastDirection==1?"COMPRA":lastDirection==-1?"VENTA":"--")
+    f_row(4,"BE",beMoved?"BE activo":"BE pendiente")
+    f_row(5,"Dia (choppiness)",na(chop)?"--":str.tostring(chop,"#.0")+(chopDay?" consolidacion":" normal"))
+    f_row(6,"Inversiones",str.tostring(inversions))
+    f_row(7,"Candidatos / entradas",str.tostring(candidates)+" / "+str.tostring(entries))
+    f_row(8,"Descartes riesgo",str.tostring(skippedRisk))
+    f_row(9,"Estado",lastReason)
+    f_stat(0,"Nota","Trades","Acierto","PnL")
+    for r=6 to 0
+        int row=7-r
+        int n=array.get(gradeTrades,r)
+        f_stat(row,array.get(gradeNames,r),str.tostring(n),n>0?str.tostring(100.0*array.get(gradeWins,r)/n,"#")+"%":"--",n>0?str.tostring(array.get(gradePnl,r),"#.##"):"--")

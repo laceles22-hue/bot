@@ -4,12 +4,12 @@ This file gives Claude Code (and other AI assistants) guidance for working in th
 
 ## Repository status
 
-As of 2026-08-15, **this repository is empty** — it has no commits, no source files, and no
-configuration (no `package.json`, `pyproject.toml`, `go.mod`, etc.). There is currently no
-codebase, build system, test suite, or established convention to document.
+The repository holds TradingView Pine Script (v6) files. There is no build system or test
+suite: scripts are validated by pasting them into the TradingView Pine Editor.
 
-This file is a placeholder. Regenerate/expand it once real code lands — see "Keeping this file
-up to date" below.
+- `indicators/fvg_ifvg.pine` — FVG/IFVG indicator with session highs/lows.
+- `strategies/ifvg_personal.pine` — IFVG strategy for 1-minute charts that grades every
+  inversion A+..C (Dodgy's iFVG setup rating) and only trades grades >= a chosen minimum.
 
 ## What to do until real code exists
 
