@@ -550,26 +550,16 @@ if ta.change(time("D")) != 0
 if ta.change(time("W")) != 0
     pd_weekStartBar := bar_index
 
-float pd_rHi   = na
-float pd_rLo   = na
-int   pd_rLeft = na
-switch pd_src
-    "Swing (Pivots)" =>
-        pd_rHi   := pd_swHi
-        pd_rLo   := pd_swLo
-        pd_rLeft := na(pd_swHiBar) or na(pd_swLoBar) ? na : math.min(pd_swHiBar, pd_swLoBar)
-    "Lookback (N Velas)" =>
-        pd_rHi   := pd_lbHi
-        pd_rLo   := pd_lbLo
-        pd_rLeft := bar_index + math.min(pd_lbHiOff, pd_lbLoOff)
-    "Día Anterior" =>
-        pd_rHi   := pd_dHi
-        pd_rLo   := pd_dLo
-        pd_rLeft := pd_dayStartBar
-    "Semana Anterior" =>
-        pd_rHi   := pd_wHi
-        pd_rLo   := pd_wLo
-        pd_rLeft := pd_weekStartBar
+pd_isSwing = pd_src == "Swing (Pivots)"
+pd_isLb    = pd_src == "Lookback (N Velas)"
+pd_isDay   = pd_src == "Día Anterior"
+
+float pd_rHi = pd_isSwing ? pd_swHi : pd_isLb ? pd_lbHi : pd_isDay ? pd_dHi : pd_wHi
+float pd_rLo = pd_isSwing ? pd_swLo : pd_isLb ? pd_lbLo : pd_isDay ? pd_dLo : pd_wLo
+
+int pd_swLeft = na(pd_swHiBar) or na(pd_swLoBar) ? na : math.min(pd_swHiBar, pd_swLoBar)
+int pd_lbLeft = bar_index + math.min(pd_lbHiOff, pd_lbLoOff)
+int pd_rLeft  = pd_isSwing ? pd_swLeft : pd_isLb ? pd_lbLeft : pd_isDay ? pd_dayStartBar : pd_weekStartBar
 
 pd_rangeOk   = not na(pd_rHi) and not na(pd_rLo) and pd_rHi > pd_rLo
 pd_rangeSize = pd_rangeOk ? pd_rHi - pd_rLo : na
